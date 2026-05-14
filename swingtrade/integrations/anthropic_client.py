@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -36,16 +37,27 @@ def complete_json_agent(
         messages=[{"role": "user", "content": user}],
     )
     text = _extract_text(msg)
-    from swingtrade.json_utils import extract_json_object
+    from swingtrade.json_utils import extract_json_object, sanitize_discord_markdown
 
     try:
-        return extract_json_object(text)
+        raw = extract_json_object(text)
     except Exception as e:
         logger.warning("JSON parse failed, wrapping raw text: %s", e)
+        salvage = sanitize_discord_markdown(text[:18000])
+        if salvage.startswith("{") and '"discord_markdown"' in salvage:
+            try:
+                obj = json.loads(salvage)
+                if isinstance(obj, dict) and isinstance(obj.get("discord_markdown"), str):
+                    salvage = sanitize_discord_markdown(obj["discord_markdown"])
+            except json.JSONDecodeError:
+                pass
         return {
-            "discord_markdown": text[:18000],
+            "discord_markdown": salvage or "_Parse error — see logs._",
             "structured": {"parse_error": str(e), "raw_prefix": text[:500]},
         }
+    dm = raw.get("discord_markdown")
+    raw["discord_markdown"] = sanitize_discord_markdown(dm)
+    return raw
 
 
 def _extract_text(msg: Any) -> str:
