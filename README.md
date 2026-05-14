@@ -9,6 +9,7 @@ A **scheduled multi-agent pipeline** (Anthropic + market data) that posts to Dis
 | Process | Command | Purpose |
 |--------|---------|--------|
 | **Pipeline** (short-lived) | `python -m swingtrade run …` | Runs agents in order, posts to webhooks, then exits. |
+| **Single agent** (short-lived) | `python -m swingtrade run-agent …` | Runs **one** agent (and any **silent** upstream steps it needs), posts **only that agent’s** usual Discord webhook(s). |
 | **Watchlist bot** (always on) | `python -m swingtrade bot` | Slash commands: `/add`, `/remove`, `/liststocks` → updates `config/watchlist.yaml`. |
 
 **Pipeline order:** Market Sentiment → Hard Veto → Technical Analysis → Sentiment → CIO.
@@ -69,7 +70,40 @@ python -m swingtrade run --session post_market --max-tickers 25
 python -m swingtrade bot
 ```
 
-If `pip install -e .` put the script on your `PATH`, you can use `swingtrade run …` and `swingtrade bot` instead of `python -m swingtrade …`.
+### Run one agent only (`run-agent`)
+
+Use this when you want a **single** step (e.g. Technical) without running the full pipeline. The app still posts that agent’s **normal** Discord webhook(s). Some agents **run upstream steps in memory only** (no Discord) so inputs match the full pipeline—for example **Technical** runs **Hard Veto** first to get survivors, then TA, then posts to the **watchlist** webhook only.
+
+**Windows (recommended if `swingtrade` is not on PATH):**
+
+```powershell
+py -3 -m swingtrade run-agent Technical --session pre_market
+```
+
+**Unix / venv** (same flags; agent names are **case-insensitive**):
+
+```bash
+python -m swingtrade run-agent Technical --session pre_market
+```
+
+| `AGENT` value | Posts to (same as full pipeline) | Notes |
+|---------------|-----------------------------------|--------|
+| `market-sentiment` | **pre_market:** daily briefing webhook. **post_market:** earnings-flow webhook (standalone header). | No other agents. |
+| `hard-veto` | Earnings-flow webhook (veto section only). | No other agents. |
+| `technical` or `Technical` | Watchlist webhook. | Runs **hard veto** first (no Discord). |
+| `sentiment` | Macro/tech webhook + market-news digest. | Runs **hard veto** first (no Discord). |
+| `cio` | Trade-setups webhook; **pre_market** also risk-management webhook with JSON. | Runs **market sentiment → hard veto → technical → sentiment** with **no** Discord, then CIO. |
+
+Shared flags (same as `run`):
+
+```bash
+python -m swingtrade run-agent technical --session post_market --dry-run
+python -m swingtrade run-agent cio --session pre_market --max-tickers 15
+```
+
+Aliases accepted after normalizing case and underscores: e.g. `Technical`, `technical`, `technical_analysis`.
+
+If `pip install -e .` put `swingtrade` on your `PATH`, you can use `swingtrade run …`, `swingtrade run-agent …`, and `swingtrade bot` instead of `python -m swingtrade …` / `py -3 -m swingtrade …`.
 
 **Logging:** optional `SWINGTRADE_LOG_LEVEL` (default `INFO`), e.g. `export SWINGTRADE_LOG_LEVEL=DEBUG`.
 
@@ -140,7 +174,7 @@ SwingTradeV2/
 │   └── …
 └── swingtrade/
     ├── __main__.py           # python -m swingtrade
-    ├── cli.py                # run | bot
+    ├── cli.py                # run | run-agent | bot
     ├── pipeline.py           # Orchestration + webhook posting
     ├── settings.py           # pydantic-settings from env
     ├── prompt_loader.py      # Loads prompts/*.md
@@ -158,4 +192,5 @@ SwingTradeV2/
 - **`FileNotFoundError` for prompts:** Run from repo root or set `SWINGTRADE_PROMPTS_DIR` to the folder that contains each agent’s `*_body.md` + `*_schema.md` pair (or a legacy `*_system.md`).
 - **Missing config:** Ensure `config/watchlist.yaml` and `config/universe.yaml` exist (defaults are in the repo).
 - **Stub agent messages:** If `ANTHROPIC_API_KEY` is unset, LLM agents return short stubs; hard veto still runs on data where possible.
+- **`swingtrade` is not recognized (Windows):** Use `py -3 -m swingtrade …` from the repo root (see **Run one agent only** above), or activate `.venv` and/or run `pip install -e .` so `Scripts` is on your `PATH`.
 - **No headlines / empty `#market-news`:** Set **`NEWSAPI_KEY`** or **`NEWS_API_KEY`** in `.env` in the **inner** project folder (run commands from that folder so `.env` loads). NewsAPI often returns HTTP 200 with `status: "error"` in JSON; logs print **`message`**. The client tries **`/v2/top-headlines`** as a fallback. Optional **`NEWSAPI_MACRO_QUERIES`**: pipe-separated broad queries, e.g. `Fed OR rates|tech OR semiconductor`. Per-ticker news runs only for symbols in the current run — raise **`--max-tickers`** (default 30) to cover more names. Test: `SWINGTRADE_LOG_LEVEL=INFO python -c "import logging; logging.basicConfig(level=logging.INFO); from swingtrade.settings import get_settings; from swingtrade.integrations.newsapi_client import newsapi_headlines, news_query_for_equity; get_settings.cache_clear(); s=get_settings(); print('articles', len(newsapi_headlines(s, news_query_for_equity('NVDA'), page_size=3)))"`.

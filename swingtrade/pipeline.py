@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from anthropic import Anthropic
 
@@ -80,6 +80,154 @@ def _survivors_after_veto(hv: AgentResult, trade: list[str]) -> list[str]:
         if isinstance(r, dict) and r.get("killed") and isinstance(r.get("symbol"), str):
             killed.add(r["symbol"])
     return [t for t in trade if t not in killed]
+
+
+SingleAgentName = Literal[
+    "market_sentiment",
+    "hard_veto",
+    "technical_analysis",
+    "sentiment",
+    "cio",
+]
+
+
+def run_single_agent(
+    *,
+    agent: SingleAgentName,
+    session: SessionName,
+    dry_run: bool = False,
+    max_tickers: int = 30,
+    settings: Settings | None = None,
+) -> None:
+    """Run one pipeline agent and POST only that agent's usual Discord payload(s).
+
+    Upstream agents are executed **without** Discord when their outputs are required
+    (e.g. survivors after hard veto for technical / sentiment / CIO).
+    """
+    settings = settings or get_settings()
+    ctx = RunContext(session=session, dry_run=dry_run)
+
+    wl = load_watchlist_yaml(settings.watchlist_path())
+    uni = load_universe_yaml(settings.universe_path())
+    merged = merge_watchlist_into_universe(uni, wl)
+    ctx_only = context_only_tickers(wl)
+    trade = [t for t in merged if t not in ctx_only][:max_tickers]
+
+    client = _anthropic_client(settings)
+    http = webhook_client(settings.http_timeout_seconds)
+
+    try:
+        if agent == "market_sentiment":
+            if client:
+                ms = run_market_sentiment(settings, ctx, client)
+            else:
+                ms = _stub("market_sentiment", "ANTHROPIC_API_KEY missing")
+            if session == "pre_market":
+                post_discord_webhook(
+                    http,
+                    settings.discord_webhook_daily_briefing,
+                    ms.discord_markdown,
+                    dry_run=dry_run,
+                )
+            else:
+                post_discord_webhook(
+                    http,
+                    settings.discord_webhook_earnings_flow,
+                    "**Market Sentiment (standalone)**\n" + ms.discord_markdown,
+                    dry_run=dry_run,
+                )
+            return
+
+        if agent == "hard_veto":
+            hv = run_hard_veto(settings, trade, wl)
+            post_discord_webhook(
+                http,
+                settings.discord_webhook_earnings_flow,
+                "**Earnings / veto (standalone)**\n" + hv.discord_markdown,
+                dry_run=dry_run,
+            )
+            return
+
+        hv = run_hard_veto(settings, trade, wl)
+        survivors = _survivors_after_veto(hv, trade)
+
+        if agent == "technical_analysis":
+            if client:
+                ta = run_technical(settings, ctx, client, survivors)
+            else:
+                ta = _stub("technical_analysis", "ANTHROPIC_API_KEY missing")
+            post_discord_webhook(
+                http,
+                settings.discord_webhook_watchlist,
+                ta.discord_markdown,
+                dry_run=dry_run,
+            )
+            return
+
+        if agent == "sentiment":
+            if client:
+                se = run_sentiment(settings, ctx, client, survivors)
+            else:
+                se = _stub("sentiment", "ANTHROPIC_API_KEY missing")
+            post_discord_webhook(
+                http,
+                settings.discord_webhook_macro_tech,
+                se.discord_markdown,
+                dry_run=dry_run,
+            )
+            post_discord_webhook(
+                http,
+                settings.discord_webhook_market_news,
+                format_news_digest(se.structured),
+                dry_run=dry_run,
+            )
+            return
+
+        # cio — run prior agents for context only (no Discord until CIO)
+        state = PipelineState(tickers=trade, watchlist_by_category=wl)
+        if client:
+            ms = run_market_sentiment(settings, ctx, client)
+        else:
+            ms = _stub("market_sentiment", "ANTHROPIC_API_KEY missing")
+        state.add(ms.agent_id, ms)
+        state.add(hv.agent_id, hv)
+        state.tickers = survivors
+        if client:
+            ta = run_technical(settings, ctx, client, survivors)
+        else:
+            ta = _stub("technical_analysis", "ANTHROPIC_API_KEY missing")
+        state.add(ta.agent_id, ta)
+        if client:
+            se = run_sentiment(settings, ctx, client, survivors)
+        else:
+            se = _stub("sentiment", "ANTHROPIC_API_KEY missing")
+        state.add(se.agent_id, se)
+        if client:
+            cio = run_cio(settings, ctx, state, client)
+        else:
+            cio = _stub("cio", "ANTHROPIC_API_KEY missing")
+        post_discord_webhook(
+            http,
+            settings.discord_webhook_trade_setups,
+            cio.discord_markdown,
+            dry_run=dry_run,
+        )
+        if session == "pre_market":
+            risk_body = (
+                "## Risk management\n"
+                + cio.discord_markdown
+                + "\n\n```json\n"
+                + json.dumps(cio.structured, indent=2)
+                + "\n```"
+            )
+            post_discord_webhook(
+                http,
+                settings.discord_webhook_risk_management,
+                risk_body,
+                dry_run=dry_run,
+            )
+    finally:
+        http.close()
 
 
 def run_pipeline(
