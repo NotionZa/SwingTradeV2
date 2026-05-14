@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -8,6 +9,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from swingtrade.integrations.http import chunk_discord_webhook_content
 from swingtrade.settings import get_settings
 from swingtrade.watchlist_store import (
     format_watchlist_discord,
@@ -152,6 +154,15 @@ def run_bot() -> None:
         path = settings.watchlist_path()
         data = load_watchlist_yaml(path)
         body = format_watchlist_discord(data)
-        await interaction.response.send_message(body[:2000], ephemeral=True)
+        chunks = chunk_discord_webhook_content(body)
+        if not chunks:
+            await interaction.response.send_message(
+                "_(empty watchlist)_", ephemeral=True
+            )
+            return
+        await interaction.response.send_message(chunks[0], ephemeral=True)
+        for part in chunks[1:]:
+            await asyncio.sleep(0.25)
+            await interaction.followup.send(part, ephemeral=True)
 
     bot.run(settings.discord_bot_token, log_handler=None)

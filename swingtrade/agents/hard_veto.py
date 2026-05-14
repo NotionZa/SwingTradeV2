@@ -83,7 +83,7 @@ def run_hard_veto(
             lines.append("**Skipped downstream (still in YAML):** " + ", ".join(f"`{x}`" for x in shown))
             if len(killed_watchlist) > len(shown):
                 lines.append(f"_…and {len(killed_watchlist) - len(shown)} more._")
-        md = "\n".join(lines)[:19000]
+        md = "\n".join(lines)
         structured = {
             "vetoes": rows,
             "survivors": survivors,

@@ -68,7 +68,7 @@ def format_news_digest(sentiment_structured: dict[str, Any]) -> str:
             title = item.get("title") or ""
             src = item.get("source") or ""
             lines.append(f"- {title} _({src})_")
-    return "\n".join(lines)[:19000]
+    return "\n".join(lines)
 
 
 def _survivors_after_veto(hv: AgentResult, trade: list[str]) -> list[str]:
@@ -126,12 +126,10 @@ def run_pipeline(
         post_discord_webhook(
             http,
             settings.discord_webhook_earnings_flow,
-            (
-                "**Market Sentiment (snapshot)**\n"
-                + ms.discord_markdown[:900]
-                + "\n\n**Earnings / veto**\n"
-                + hv.discord_markdown
-            )[:1990],
+            "**Market Sentiment (snapshot)**\n"
+            + ms.discord_markdown
+            + "\n\n**Earnings / veto**\n"
+            + hv.discord_markdown,
             dry_run=dry_run,
         )
 
@@ -184,13 +182,13 @@ def run_pipeline(
                 "## Risk management\n"
                 + cio.discord_markdown
                 + "\n\n```json\n"
-                + json.dumps(cio.structured, indent=2)[:1500]
+                + json.dumps(cio.structured, indent=2)
                 + "\n```"
             )
             post_discord_webhook(
                 http,
                 settings.discord_webhook_risk_management,
-                risk_body[:19000],
+                risk_body,
                 dry_run=dry_run,
             )
     finally:
