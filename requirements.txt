@@ -1,0 +1,21 @@
+# SwingTradeV2 — runtime dependencies (Python 3.12+)
+# Keep in sync with pyproject.toml [project.dependencies].
+#
+# Setup (from this folder, the one next to pyproject.toml):
+#   python -m venv .venv
+#   source .venv/bin/activate          # Windows: .venv\Scripts\activate
+#   pip install -U pip
+#   pip install -r requirements.txt
+#   pip install -e .                   # installs the swingtrade package (needed for `python -m swingtrade`)
+#
+# One-liner alternative (deps come from pyproject.toml):
+#   pip install -e .
+
+anthropic>=0.40.0
+discord.py>=2.4.0
+httpx>=0.27.0
+pydantic-settings>=2.6.0
+pyyaml>=6.0.1
+yfinance>=0.2.50
+pandas>=2.0.0
+praw>=7.7.0
