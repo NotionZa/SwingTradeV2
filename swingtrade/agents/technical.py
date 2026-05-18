@@ -146,8 +146,13 @@ def run_technical(
         timeout_seconds=300.0,
     )
     md = _resolve_technical_discord_markdown(raw) or "_No TA output_"
-    md = md.rstrip() + _discord_market_cap_snapshot(per)
-    structured = raw.get("structured")
+
+# Market cap is already included per ticker by the Technical Agent prompt.
+# Do not append the duplicate market cap footer.
+# md = md.rstrip() + _discord_market_cap_snapshot(per)
+
+md = md.rstrip()
+structured = raw.get("structured")
     if not isinstance(structured, dict):
         structured = {"scores": {}, "notes": ""}
     structured = {**structured, "inputs": per}
