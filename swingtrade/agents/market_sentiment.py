@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Any
 
 import httpx
 from anthropic import Anthropic
 
 from swingtrade.integrations.anthropic_client import complete_json_agent
-from swingtrade.integrations.newsapi_client import newsapi_macro_merged
+from swingtrade.integrations.calendar_utils import get_next_opex
+from swingtrade.integrations.finnhub_client import finnhub_market_news
 from swingtrade.integrations.yfinance_data import bundle_macro_series
 from swingtrade.models.agents import AgentResult, RunContext
 from swingtrade.prompt_loader import load_system_prompt
@@ -22,31 +24,24 @@ def run_market_sentiment(
     client: Anthropic,
 ) -> AgentResult:
     yfinance_bundle = bundle_macro_series()
-    macro_queries = settings.macro_news_queries()
-    macro_headlines: list[dict[str, Any]] = []
-    if not settings.newsapi_key.strip():
+    market_news_headlines: list[dict[str, Any]] = []
+    if not settings.finnhub_key.strip():
         logger.warning(
-            "NEWSAPI_KEY is unset — no macro headlines for Market Sentiment "
-            "(set NEWSAPI_KEY or NEWS_API_KEY in .env)."
+            "FINNHUB_KEY is unset — no market news headlines for Market Sentiment."
         )
     else:
         with httpx.Client(timeout=settings.http_timeout_seconds) as http:
-            macro_articles = newsapi_macro_merged(
-                settings,
-                http,
-                macro_queries,
-                per_query_size=6,
-                max_total=20,
-            )
-            macro_headlines = [
-                {"title": a.get("title"), "source": (a.get("source") or {}).get("name")}
-                for a in macro_articles
-            ]
+            market_news_headlines = finnhub_market_news(settings, http)
+
+    today = date.today()
+    next_opex, days_to_opex = get_next_opex(today)
+    next_opex_date = next_opex.isoformat()
 
     payload = {
         "macro_bundle": yfinance_bundle,
-        "macro_queries": macro_queries,
-        "macro_headlines": macro_headlines,
+        "market_news_headlines": market_news_headlines,
+        "next_opex_date": next_opex_date,
+        "days_to_opex": days_to_opex,
     }
     user = f"Session={ctx.session}\nMarket Sentiment inputs:\n{payload}"
     raw = complete_json_agent(
@@ -64,10 +59,11 @@ def run_market_sentiment(
         agent_id="market_sentiment",
         discord_markdown=md,
         structured={
-            "macro_bundle": yfinance_bundle,
-            "macro_queries": macro_queries,
-            "macro_headlines": macro_headlines,
             **structured,
+            "macro_bundle": yfinance_bundle,
+            "market_news_headlines": market_news_headlines,
+            "next_opex_date": next_opex_date,
+            "days_to_opex": days_to_opex,
         },
         model_used=settings.anthropic_model_haiku,
     )

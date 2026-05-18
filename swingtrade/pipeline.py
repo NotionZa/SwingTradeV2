@@ -71,7 +71,7 @@ def format_news_digest(sentiment_structured: dict[str, Any]) -> str:
         for item in news[:4]:
             if not isinstance(item, dict):
                 continue
-            title = item.get("title") or ""
+            title = item.get("headline") or item.get("title") or ""
             src = item.get("source") or ""
             lines.append(f"- {title} _({src})_")
     return "\n".join(lines)

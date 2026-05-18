@@ -17,6 +17,64 @@ def fetch_ohlcv(symbol: str, period: str = "3mo", interval: str = "1d") -> pd.Da
     return df
 
 
+def _pct_change(current: float, base: float) -> float | None:
+    if base == 0 or base != base or current != current:
+        return None
+    return round((current - base) / base * 100.0, 2)
+
+
+def _safe_float(v: Any) -> float | None:
+    if v is None:
+        return None
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    if x != x:
+        return None
+    return round(x, 4)
+
+
+def macro_proxy_ohlcv_summary(symbol: str) -> dict[str, Any]:
+    """Daily-bar summary for macro proxies (30d window) used by Market Sentiment."""
+    df = fetch_ohlcv(symbol, period="30d", interval="1d")
+    if df.empty or "Close" not in df:
+        return {"symbol": symbol, "error": "no_data"}
+
+    close = df["Close"].astype(float)
+    high = df["High"].astype(float) if "High" in df else close
+    low = df["Low"].astype(float) if "Low" in df else close
+
+    last_close = _safe_float(close.iloc[-1])
+    prev_close = _safe_float(close.iloc[-2]) if len(close) >= 2 else None
+
+    change_pct = None
+    if last_close is not None and prev_close is not None:
+        change_pct = _pct_change(last_close, prev_close)
+
+    week_change_pct = None
+    if len(close) >= 6 and last_close is not None:
+        base = _safe_float(close.iloc[-6])
+        if base is not None:
+            week_change_pct = _pct_change(last_close, base)
+
+    window = close.tail(min(20, len(close)))
+    twenty_day_high = _safe_float(window.max())
+    twenty_day_low = _safe_float(window.min())
+
+    return {
+        "symbol": symbol,
+        "last_close": last_close,
+        "prev_close": prev_close,
+        "change_pct": change_pct,
+        "week_change_pct": week_change_pct,
+        "day_range_high": _safe_float(high.iloc[-1]),
+        "day_range_low": _safe_float(low.iloc[-1]),
+        "twenty_day_high": twenty_day_high,
+        "twenty_day_low": twenty_day_low,
+    }
+
+
 def last_close_and_adv_usd(symbol: str, lookback: int = 20) -> dict[str, Any]:
     """Approximate ADV in USD using last N daily bars."""
     df = fetch_ohlcv(symbol, period="6mo")
@@ -43,11 +101,11 @@ def bundle_macro_series() -> dict[str, Any]:
         "SOXX": "SOXX",
         "DXY": "DX-Y.NYB",
         "TLT": "TLT",
+        "TNX": "^TNX",
     }
     out: dict[str, Any] = {}
     for label, sym in symbols.items():
-        info = last_close_and_adv_usd(sym, lookback=5)
-        out[label] = info
+        out[label] = macro_proxy_ohlcv_summary(sym)
     return out
 
 

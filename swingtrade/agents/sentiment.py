@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import logging
+from datetime import date, timedelta
 from typing import Any
 
 import httpx
 from anthropic import Anthropic
 
 from swingtrade.integrations.anthropic_client import complete_json_agent
-from swingtrade.integrations.newsapi_client import (
-    news_query_for_equity,
-    newsapi_headlines,
-)
+from swingtrade.integrations.finnhub_client import finnhub_company_news
 from swingtrade.integrations.reddit_client import make_reddit_client, reddit_search_snippets
 from swingtrade.models.agents import AgentResult, RunContext
 from swingtrade.prompt_loader import load_system_prompt
@@ -25,32 +23,37 @@ def run_sentiment(
     client: Anthropic,
     tickers: list[str],
 ) -> AgentResult:
-    if not settings.newsapi_key.strip():
+    if not settings.finnhub_key.strip():
         logger.warning(
-            "NEWSAPI_KEY is unset — no NewsAPI headlines (set NEWSAPI_KEY or NEWS_API_KEY in .env). "
-            "Reddit is separate (REDDIT_* vars)."
+            "FINNHUB_KEY is unset — no company news headlines for Sentiment."
         )
     reddit = make_reddit_client(settings)
+    to_date = date.today()
+    from_date = to_date - timedelta(days=7)
     bundle: dict[str, Any] = {}
     with httpx.Client(timeout=settings.http_timeout_seconds) as http:
         per: dict[str, Any] = {}
         for sym in tickers:
-            q = news_query_for_equity(sym)
-            arts = newsapi_headlines(settings, q, page_size=4, client=http)
+            articles = finnhub_company_news(
+                settings,
+                http,
+                sym,
+                from_date,
+                to_date,
+                limit=5,
+            )
             per[sym] = {
-                "news_query": q,
-                "news": [
-                    {"title": a.get("title"), "source": (a.get("source") or {}).get("name")}
-                    for a in arts
-                ],
+                "symbol": sym,
+                "news_from": from_date.isoformat(),
+                "news_to": to_date.isoformat(),
+                "news": articles,
                 "reddit": reddit_search_snippets(reddit, sym, limit=4),
             }
     bundle["per_ticker"] = per
 
     with_news = sum(1 for v in per.values() if v.get("news"))
     logger.info(
-        "Sentiment news: tickers=%s with_any_headline=%s "
-        "(NewsAPI per ticker only; macro moved to Market Sentiment)",
+        "Sentiment news: tickers=%s with_any_headline=%s (Finnhub company-news, last 7 days)",
         len(tickers),
         with_news,
     )

@@ -126,7 +126,7 @@ Run the **bot** under **systemd**, **supervisor**, or **Docker** with a restart 
 
 | Area | Location / mechanism |
 |------|----------------------|
-| **Secrets & URLs** | `.env` (from `.env.example`): Anthropic, Finnhub, NewsAPI, Reddit, Discord webhooks, bot token, optional guild/role allowlists. |
+| **Secrets & URLs** | `.env` (from `.env.example`): Anthropic, Finnhub, Reddit, Discord webhooks, bot token, optional guild/role allowlists. |
 | **Watchlist** | `config/watchlist.yaml` — categories and tickers; bot writes here with safe atomic save. |
 | **Universe** | `config/universe.yaml` — broader symbol list merged with the watchlist for scanning. |
 | **Agent system prompts** | Split per agent: `prompts/<agent>_body.md` (role, tone, rules) + `prompts/<agent>_schema.md` (JSON shape). Shared envelope: `prompts/_shared_output_contract.md`. Legacy: a single `prompts/<agent>_system.md` still loads if the `_body` / `_schema` pair is missing. |
@@ -182,7 +182,7 @@ SwingTradeV2/
     ├── watchlist_store.py    # Safe YAML I/O
     ├── universe_loader.py    # Universe + merge helpers
     ├── agents/               # One module per agent step
-    └── integrations/       # Anthropic, yfinance, Finnhub, NewsAPI, webhooks, pandas-only TA
+    └── integrations/       # Anthropic, yfinance, Finnhub, webhooks, pandas-only TA
 ```
 
 ---
@@ -193,4 +193,4 @@ SwingTradeV2/
 - **Missing config:** Ensure `config/watchlist.yaml` and `config/universe.yaml` exist (defaults are in the repo).
 - **Stub agent messages:** If `ANTHROPIC_API_KEY` is unset, LLM agents return short stubs; hard veto still runs on data where possible.
 - **`swingtrade` is not recognized (Windows):** Use `py -3 -m swingtrade …` from the repo root (see **Run one agent only** above), or activate `.venv` and/or run `pip install -e .` so `Scripts` is on your `PATH`.
-- **No headlines / empty `#market-news`:** Set **`NEWSAPI_KEY`** or **`NEWS_API_KEY`** in `.env` in the **inner** project folder (run commands from that folder so `.env` loads). NewsAPI often returns HTTP 200 with `status: "error"` in JSON; logs print **`message`**. The client tries **`/v2/top-headlines`** as a fallback. Optional **`NEWSAPI_MACRO_QUERIES`**: pipe-separated broad queries, e.g. `Fed OR rates|tech OR semiconductor`. Per-ticker news runs only for symbols in the current run — raise **`--max-tickers`** (default 30) to cover more names. Test: `SWINGTRADE_LOG_LEVEL=INFO python -c "import logging; logging.basicConfig(level=logging.INFO); from swingtrade.settings import get_settings; from swingtrade.integrations.newsapi_client import newsapi_headlines, news_query_for_equity; get_settings.cache_clear(); s=get_settings(); print('articles', len(newsapi_headlines(s, news_query_for_equity('NVDA'), page_size=3)))"`.
+- **No headlines / empty `#market-news`:** Set **`FINNHUB_KEY`** in `.env` in the **inner** project folder (run commands from that folder so `.env` loads). Sentiment uses Finnhub **company-news** (last 7 days, up to 5 articles per ticker) for symbols in the current run — raise **`--max-tickers`** (default 30) to cover more names. Market Sentiment uses Finnhub **market news** (`finnhub_market_news`). Test company news: `python -c "from datetime import date, timedelta; import httpx; from swingtrade.settings import get_settings; from swingtrade.integrations.finnhub_client import finnhub_company_news; get_settings.cache_clear(); s=get_settings(); d=date.today(); c=httpx.Client(timeout=30); print(len(finnhub_company_news(s,c,'NVDA',d-timedelta(days=7),d,limit=5)))"`.

@@ -23,15 +23,6 @@ class Settings(BaseSettings):
     )
 
     anthropic_api_key: str = Field(default="", validation_alias="ANTHROPIC_API_KEY")
-    newsapi_key: str = Field(
-        default="",
-        validation_alias=AliasChoices("NEWSAPI_KEY", "NEWS_API_KEY"),
-    )
-    # Pipe-separated NewsAPI `q` strings for general/macro news. Empty = built-in defaults in macro_news_queries().
-    newsapi_macro_queries: str = Field(
-        default="",
-        validation_alias="NEWSAPI_MACRO_QUERIES",
-    )
     finnhub_key: str = Field(default="", validation_alias="FINNHUB_KEY")
     reddit_client_id: str = Field(default="", validation_alias="REDDIT_CLIENT_ID")
     reddit_client_secret: str = Field(default="", validation_alias="REDDIT_CLIENT_SECRET")
@@ -113,16 +104,6 @@ class Settings(BaseSettings):
 
     def universe_path(self) -> Path:
         return self.swingtrade_config_dir / "universe.yaml"
-
-    def macro_news_queries(self) -> list[str]:
-        """Broad NewsAPI `q` strings for general market / tech news (not per-ticker)."""
-        raw = self.newsapi_macro_queries.strip()
-        if raw:
-            return [p.strip() for p in raw.split("|") if p.strip()]
-        return [
-            "Federal Reserve OR interest rates OR inflation OR stock market OR wall street",
-            "technology OR semiconductor OR artificial intelligence OR earnings OR guidance",
-        ]
 
     def allowed_guild_ids(self) -> set[int]:
         return _parse_snowflake_set(self.discord_allowed_guild_ids)
