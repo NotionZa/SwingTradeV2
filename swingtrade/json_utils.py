@@ -45,6 +45,18 @@ def extract_json_object(text: str) -> dict[str, Any]:
     raise json.JSONDecodeError("No JSON object found in model output", text, 0)
 
 
+def extract_legacy_discord_markdown(text: str) -> str:
+    """Parse DISCORD_MARKDOWN: … section from older prompt layouts."""
+    m = re.search(
+        r"(?:^|\n)\s*DISCORD_MARKDOWN:\s*\n([\s\S]*?)(?:\n\s*STRUCTURED_SCORES:|\Z)",
+        text,
+        re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).strip()
+    return ""
+
+
 def sanitize_discord_markdown(md: Any) -> str:
     """Strip accidental code fences / nested JSON so Discord webhooks stay readable."""
     if md is None:

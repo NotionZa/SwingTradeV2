@@ -3,13 +3,9 @@ Technical Analysis — JSON schema
 Limits
 
 - discord_markdown must stay under 18,000 characters.
-
 - Output must be valid JSON.
-
 - Every ticker in the input payload should appear in structured.tickers if enough data exists.
-
 - If data is missing or unreliable, include the ticker and mark strategy_match as "No Clean Setup".
-
 - Do not output BUY, WATCH, PASS, or BLOCKED. That belongs to the CIO Agent.
 
 Top-level keys
@@ -18,7 +14,7 @@ Top-level keys
 
 |---|---|---|
 
-| discord_markdown | string | Markdown table or grouped bullets for Discord. |
+| discord_markdown | string | Grouped bullets for Discord. Do not use markdown tables because Discord does not render them reliably.|
 
 | structured | object | Machine-readable TA output for CIO Agent. |
 
@@ -93,57 +89,39 @@ Accepted enum values
 strategy_match:
 
 - "Momentum"
-
 - "Breakout"
-
 - "Pullback"
-
 - "No Clean Setup"
 
 setup_quality:
 
 - "A"
-
 - "B"
-
 - "C"
-
 - "No Trade"
 
 trend_status:
 
 - "Bullish"
-
 - "Neutral"
-
 - "Bearish"
-
 - "Broken"
-
 - "Unknown"
 
 momentum_status:
 
 - "Strong"
-
 - "Improving"
-
 - "Neutral"
-
 - "Weak"
-
 - "Extended"
-
 - "Unknown"
 
 relative_strength_vs_qqq:
 
 - "Outperforming"
-
 - "In line"
-
 - "Underperforming"
-
 - "Unknown"
 
 Scoring rules
@@ -163,11 +141,8 @@ Scoring rules
 Risk/reward rules
 
 - A-grade setups require risk_reward >= 2.5.
-
 - If risk_reward is below 2.5, setup_quality cannot be "A".
-
 - If no clean entry, stop, or target exists, risk_reward must be null.
-
 - Do not invent levels if the data does not support them.
 
 Minimal valid example
@@ -178,135 +153,136 @@ Minimal valid example
 
   "structured": {
 
-    "scores": {
+```
+"scores": {
 
-      "NVDA": 8.4,
+  "NVDA": 8.4,
 
-      "MSFT": 6.8
+  "MSFT": 6.8
 
-    },
+},
 
-    "notes": "Most large-cap tech names remain constructive, but extended names require pullback entries rather than chase entries.",
+"notes": "Most large-cap tech names remain constructive, but extended names require pullback entries rather than chase entries.",
 
-    "tickers": {
+"tickers": {
 
-      "NVDA": {
+  "NVDA": {
 
-        "ticker": "NVDA",
+    "ticker": "NVDA",
 
-        "market_cap_human": "$3.1T",
+    "market_cap_human": "$3.1T",
 
-        "last_price": 130.25,
+    "last_price": 130.25,
 
-        "strategy_match": "Momentum",
+    "strategy_match": "Momentum",
 
-        "secondary_context": "Testing recent resistance",
+    "secondary_context": "Testing recent resistance",
 
-        "ta_score": 8.4,
+    "ta_score": 8.4,
 
-        "setup_quality": "A",
+    "setup_quality": "A",
 
-        "trend_status": "Bullish",
+    "trend_status": "Bullish",
 
-        "momentum_status": "Strong",
+    "momentum_status": "Strong",
 
-        "rsi_comment": "RSI is in the preferred momentum range and not yet excessively overbought.",
+    "rsi_comment": "RSI is in the preferred momentum range and not yet excessively overbought.",
 
-        "macd_comment": "MACD is bullish or improving.",
+    "macd_comment": "MACD is bullish or improving.",
 
-        "moving_average_structure": "Price is above the 20DMA, 50DMA, and 200DMA.",
+    "moving_average_structure": "Price is above the 20DMA, 50DMA, and 200DMA.",
 
-        "volume_confirmation": "Volume is above the 20-day average and confirms the move.",
+    "volume_confirmation": "Volume is above the 20-day average and confirms the move.",
 
-        "relative_strength_vs_qqq": "Outperforming",
+    "relative_strength_vs_qqq": "Outperforming",
 
-        "key_support": 124.5,
+    "key_support": 124.5,
 
-        "key_resistance": 135.0,
+    "key_resistance": 135.0,
 
-        "suggested_entry_zone": "128.00 - 131.00",
+    "suggested_entry_zone": "128.00 - 131.00",
 
-        "suggested_stop_loss": 124.5,
+    "suggested_stop_loss": 124.5,
 
-        "suggested_target": 145.0,
+    "suggested_target": 145.0,
 
-        "risk_reward": 2.7,
+    "risk_reward": 2.7,
 
-        "technical_risks": [
+    "technical_risks": [
 
-          "Slightly extended from nearest support"
+      "Slightly extended from nearest support"
 
-        ],
+    ],
 
-        "invalidation_condition": "Close below $124.50 support.",
+    "invalidation_condition": "Close below $124.50 support.",
 
-        "summary": "Strong momentum setup with clean trend structure, positive relative strength, and clear invalidation.",
+    "summary": "Strong momentum setup with clean trend structure, positive relative strength, and clear invalidation.",
 
-        "cio_notes": "Technically tradeable if hard veto passes and market regime remains supportive."
+    "cio_notes": "Technically tradeable if hard veto passes and market regime remains supportive."
 
-      },
+  },
 
-      "MSFT": {
+  "MSFT": {
 
-        "ticker": "MSFT",
+    "ticker": "MSFT",
 
-        "market_cap_human": "$3.0T",
+    "market_cap_human": "$3.0T",
 
-        "last_price": 420.15,
+    "last_price": 420.15,
 
-        "strategy_match": "Pullback",
+    "strategy_match": "Pullback",
 
-        "secondary_context": "Testing support near moving averages",
+    "secondary_context": "Testing support near moving averages",
 
-        "ta_score": 6.8,
+    "ta_score": 6.8,
 
-        "setup_quality": "B",
+    "setup_quality": "B",
 
-        "trend_status": "Bullish",
+    "trend_status": "Bullish",
 
-        "momentum_status": "Improving",
+    "momentum_status": "Improving",
 
-        "rsi_comment": "RSI is neutral and may be stabilising.",
+    "rsi_comment": "RSI is neutral and may be stabilising.",
 
-        "macd_comment": "MACD is not strongly bullish yet.",
+    "macd_comment": "MACD is not strongly bullish yet.",
 
-        "moving_average_structure": "Price remains above longer-term moving averages but needs short-term confirmation.",
+    "moving_average_structure": "Price remains above longer-term moving averages but needs short-term confirmation.",
 
-        "volume_confirmation": "Volume confirmation is not yet strong.",
+    "volume_confirmation": "Volume confirmation is not yet strong.",
 
-        "relative_strength_vs_qqq": "In line",
+    "relative_strength_vs_qqq": "In line",
 
-        "key_support": 410.0,
+    "key_support": 410.0,
 
-        "key_resistance": 435.0,
+    "key_resistance": 435.0,
 
-        "suggested_entry_zone": "414.00 - 420.00",
+    "suggested_entry_zone": "414.00 - 420.00",
 
-        "suggested_stop_loss": 407.5,
+    "suggested_stop_loss": 407.5,
 
-        "suggested_target": 435.0,
+    "suggested_target": 435.0,
 
-        "risk_reward": 2.1,
+    "risk_reward": 2.1,
 
-        "technical_risks": [
+    "technical_risks": [
 
-          "Risk/reward below 2.5",
+      "Risk/reward below 2.5",
 
-          "Needs bounce confirmation"
+      "Needs bounce confirmation"
 
-        ],
+    ],
 
-        "invalidation_condition": "Close below $407.50.",
+    "invalidation_condition": "Close below $407.50.",
 
-        "summary": "Constructive pullback but not A-grade yet due to incomplete confirmation and weaker R/R.",
+    "summary": "Constructive pullback but not A-grade yet due to incomplete confirmation and weaker R/R.",
 
-        "cio_notes": "Better suited for WATCH unless confirmation improves."
-
-      }
-
-    }
+    "cio_notes": "Better suited for WATCH unless confirmation improves."
 
   }
 
 }
+```
 
+  }
+
+}

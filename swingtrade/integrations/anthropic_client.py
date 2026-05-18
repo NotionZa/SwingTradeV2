@@ -28,22 +28,31 @@ def complete_json_agent(
     system: str,
     user: str,
     max_tokens: int = 4096,
+    timeout_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Ask model for a single JSON object in the assistant text."""
-    msg = client.messages.create(
+    api = client
+    if timeout_seconds is not None:
+        api = client.with_options(timeout=timeout_seconds)
+    msg = api.messages.create(
         model=model,
         max_tokens=max_tokens,
         system=system,
         messages=[{"role": "user", "content": user}],
     )
     text = _extract_text(msg)
-    from swingtrade.json_utils import extract_json_object, sanitize_discord_markdown
+    from swingtrade.json_utils import (
+        extract_json_object,
+        extract_legacy_discord_markdown,
+        sanitize_discord_markdown,
+    )
 
     try:
         raw = extract_json_object(text)
     except Exception as e:
         logger.warning("JSON parse failed, wrapping raw text: %s", e)
-        salvage = sanitize_discord_markdown(text[:18000])
+        legacy_md = extract_legacy_discord_markdown(text)
+        salvage = legacy_md or sanitize_discord_markdown(text[:18000])
         if salvage.startswith("{") and '"discord_markdown"' in salvage:
             try:
                 obj = json.loads(salvage)
@@ -56,7 +65,12 @@ def complete_json_agent(
             "structured": {"parse_error": str(e), "raw_prefix": text[:500]},
         }
     dm = raw.get("discord_markdown")
-    raw["discord_markdown"] = sanitize_discord_markdown(dm)
+    dm = sanitize_discord_markdown(dm)
+    if not dm:
+        legacy_md = extract_legacy_discord_markdown(text)
+        if legacy_md:
+            dm = legacy_md
+    raw["discord_markdown"] = dm
     return raw
 
 

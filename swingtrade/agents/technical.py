@@ -33,6 +33,68 @@ def _format_usd_compact(n: float) -> str:
     return f"{sign}${x:,.0f}"
 
 
+def _format_ta_discord_from_structured(structured: dict[str, Any]) -> str:
+    """Build watchlist table when the model omits or empties discord_markdown."""
+    tickers = structured.get("tickers")
+    if not isinstance(tickers, dict) or not tickers:
+        return ""
+    lines = [
+        "| Ticker | Mkt Cap | Setup | TA Score | Trend | Momentum | RS vs QQQ | Key Levels | Risk |",
+        "|---|---:|---|---:|---|---|---|---|---|",
+    ]
+    for sym in sorted(tickers):
+        row = tickers[sym]
+        if not isinstance(row, dict):
+            continue
+        ks, kr = row.get("key_support"), row.get("key_resistance")
+        level_parts: list[str] = []
+        if ks is not None:
+            level_parts.append(f"S: {ks}")
+        if kr is not None:
+            level_parts.append(f"R: {kr}")
+        levels = " / ".join(level_parts) if level_parts else "—"
+        risks = row.get("technical_risks")
+        if isinstance(risks, list) and risks:
+            risk = "; ".join(str(r) for r in risks[:2])
+        else:
+            risk = str(row.get("summary") or "—")[:100]
+        lines.append(
+            "| {ticker} | {cap} | {setup} | {score} | {trend} | {mom} | {rs} | {levels} | {risk} |".format(
+                ticker=row.get("ticker", sym),
+                cap=row.get("market_cap_human", "N/A"),
+                setup=row.get("strategy_match", "—"),
+                score=row.get("ta_score", "—"),
+                trend=row.get("trend_status", "—"),
+                mom=row.get("momentum_status", "—"),
+                rs=row.get("relative_strength_vs_qqq", "—"),
+                levels=levels,
+                risk=risk,
+            )
+        )
+    notes = structured.get("notes")
+    if isinstance(notes, str) and notes.strip():
+        lines.extend(["", f"**Themes:** {notes.strip()}"])
+    return "\n".join(lines)
+
+
+def _resolve_technical_discord_markdown(raw: dict[str, Any]) -> str:
+    md = str(raw.get("discord_markdown", "")).strip()
+    if md:
+        return md
+    structured = raw.get("structured")
+    if isinstance(structured, dict):
+        built = _format_ta_discord_from_structured(structured)
+        if built:
+            logger.warning(
+                "Technical agent returned empty discord_markdown; built table from structured.tickers"
+            )
+            return built
+    logger.warning(
+        "Technical agent returned empty discord_markdown and no structured.tickers to fall back on"
+    )
+    return ""
+
+
 def _discord_market_cap_snapshot(per: dict[str, Any]) -> str:
     lines = [
         "",
@@ -80,9 +142,10 @@ def run_technical(
         model=settings.anthropic_model_sonnet,
         system=load_system_prompt("technical"),
         user=user,
-        max_tokens=4096,
+        max_tokens=8192,
+        timeout_seconds=300.0,
     )
-    md = str(raw.get("discord_markdown", "")).strip() or "_No TA output_"
+    md = _resolve_technical_discord_markdown(raw) or "_No TA output_"
     md = md.rstrip() + _discord_market_cap_snapshot(per)
     structured = raw.get("structured")
     if not isinstance(structured, dict):
