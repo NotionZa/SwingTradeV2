@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     discord_webhook_risk_management: str = Field(
         default="", validation_alias="DISCORD_WEBHOOK_RISK_MANAGEMENT"
     )
+    discord_webhook_cio_context: str = Field(
+        default="", validation_alias="DISCORD_WEBHOOK_CIO_CONTEXT"
+    )
 
     discord_bot_token: str = Field(default="", validation_alias="DISCORD_BOT_TOKEN")
     discord_application_id: str = Field(

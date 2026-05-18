@@ -12,7 +12,13 @@ from swingtrade.agents.market_sentiment import run_market_sentiment
 from swingtrade.agents.sentiment import run_sentiment
 from swingtrade.agents.technical import run_technical
 from swingtrade.integrations.http import post_discord_webhook, webhook_client
-from swingtrade.models.agents import AgentResult, PipelineState, RunContext, SessionName
+from swingtrade.models.agents import (
+    AgentResult,
+    PipelineState,
+    RunContext,
+    SessionName,
+    format_cio_context_discord,
+)
 from swingtrade.settings import Settings, get_settings
 from swingtrade.universe_loader import load_universe_yaml, merge_watchlist_into_universe
 from swingtrade.watchlist_store import load_watchlist_yaml
@@ -69,6 +75,23 @@ def format_news_digest(sentiment_structured: dict[str, Any]) -> str:
             src = item.get("source") or ""
             lines.append(f"- {title} _({src})_")
     return "\n".join(lines)
+
+
+def _post_cio_context_discord(
+    http: Any,
+    settings: Settings,
+    state: PipelineState,
+    session: SessionName,
+    *,
+    dry_run: bool,
+) -> None:
+    """Post full structured CIO input (readable) — same data as ``cio_user_message``."""
+    post_discord_webhook(
+        http,
+        settings.discord_webhook_cio_context,
+        format_cio_context_discord(state, session),
+        dry_run=dry_run,
+    )
 
 
 def _survivors_after_veto(hv: AgentResult, trade: list[str]) -> list[str]:
@@ -129,13 +152,7 @@ def run_single_agent(
                     ms.discord_markdown,
                     dry_run=dry_run,
                 )
-            else:
-                post_discord_webhook(
-                    http,
-                    settings.discord_webhook_earnings_flow,
-                    "**Market Sentiment (standalone)**\n" + ms.discord_markdown,
-                    dry_run=dry_run,
-                )
+            # Earnings-flow webhook is veto-only; no Discord post for standalone MS off pre_market.
             return
 
         if agent == "hard_veto":
@@ -143,7 +160,7 @@ def run_single_agent(
             post_discord_webhook(
                 http,
                 settings.discord_webhook_earnings_flow,
-                "**Earnings / veto (standalone)**\n" + hv.discord_markdown,
+                hv.discord_markdown,
                 dry_run=dry_run,
             )
             return
@@ -202,6 +219,7 @@ def run_single_agent(
         else:
             se = _stub("sentiment", "ANTHROPIC_API_KEY missing")
         state.add(se.agent_id, se)
+        _post_cio_context_discord(http, settings, state, session, dry_run=dry_run)
         if client:
             cio = run_cio(settings, ctx, state, client)
         else:
@@ -274,10 +292,7 @@ def run_pipeline(
         post_discord_webhook(
             http,
             settings.discord_webhook_earnings_flow,
-            "**Market Sentiment (snapshot)**\n"
-            + ms.discord_markdown
-            + "\n\n**Earnings / veto**\n"
-            + hv.discord_markdown,
+            hv.discord_markdown,
             dry_run=dry_run,
         )
 
@@ -314,6 +329,7 @@ def run_pipeline(
         )
 
         # 5) CIO
+        _post_cio_context_discord(http, settings, state, session, dry_run=dry_run)
         if client:
             cio = run_cio(settings, ctx, state, client)
         else:

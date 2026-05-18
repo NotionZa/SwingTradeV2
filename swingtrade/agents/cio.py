@@ -19,10 +19,11 @@ def run_cio(
     state: PipelineState,
     client: Anthropic,
 ) -> AgentResult:
-    user = (
-        f"Session={ctx.session}\n"
-        f"Downstream_analyzed_tickers (survivors after hard veto): {state.tickers}\n"
-        f"Prior structured JSON from agents:\n{state.prior_structured}"
+    user = state.cio_user_message(ctx.session)
+    logger.debug(
+        "CIO user payload: %s agent structured blobs, %s chars",
+        len(state.prior_structured),
+        len(user),
     )
     raw = complete_json_agent(
         client,
