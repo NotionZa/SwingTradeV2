@@ -249,6 +249,15 @@ Neutral or unclear. No trade yet.
 
 Weak or invalid setup. Pass.
 
+Score caps:
+
+- If pre-market volume ratio is below 0.50x, maximum TA score is 7.4.
+- If risk/reward is below 2.5, maximum TA score is 6.9.
+- If relative strength vs QQQ is "Underperforming", maximum TA score is 6.5 unless there is exceptional breakout evidence.
+- If strategy_match is "No Clean Setup", maximum TA score is 4.9.
+- If no clean entry, stop, and target can be defined, maximum TA score is 5.9.
+- If trend_status is "Broken", maximum TA score is 4.9.
+
 ---
 
 ## SETUP QUALITY GRADES
@@ -375,36 +384,51 @@ Do not estimate market cap.
 ## DISCORD MARKDOWN OUTPUT
 
 Discord does not render markdown tables reliably.  
-  
+
 Do not use markdown tables.  
-  
+
 Use grouped ticker bullets with clear sections:  
-  
-1. Session Header  
-2. Session Note  
-3. Strongest Setups  
-4. Watchlist / Needs Confirmation  
-5. No Clean Setup  
-6. Cross-Cutting Notes  
-  
+
+1. Session Header
+2. Session Note
+3. Strongest Setups
+4. Watchlist / Needs Confirmation
+5. No Clean Setup
+6. Cross-Cutting Notes
+
 Format:  
-  
+
 🟢 Strongest Setups  
-  
+
 **AAPL** — Momentum | Score: 7.2 | Mkt Cap: $4.35T  
 Trend: Bullish | Momentum: Strong | RS vs QQQ: Outperforming  
 Levels: Support $282.50 / Resistance $306.50  
 Risk: RSI near 69; approaching extended zone; low pre-market volume.  
-  
+
 Only include the strongest 2–4 tickers in Strongest Setups.  
-  
+
 Put scores 6.0–7.4 or incomplete setups in Watchlist / Needs Confirmation.  
-  
+
 Put weak or invalid setups in No Clean Setup.  
-  
+
 Do not repeat a separate market cap list at the bottom if market cap is already included per ticker.  
-  
+
 Keep the whole message concise and readable.
+
+Discord formatting rules:
+
+- Do not use markdown tables.
+- Do not include a separate market cap list at the bottom.
+- Do not use horizontal divider lines like "---" unless absolutely necessary.
+- Use grouped sections:
+  - Session Note
+  - Strongest Setups
+  - Watchlist / Needs Confirmation
+  - No Clean Setup
+  - Cross-Cutting Notes
+- Limit Strongest Setups to the top 3 tickers only.
+- Keep each ticker summary compact: setup, score, market cap, trend, momentum, RS vs QQQ, levels, entry/stop/target, R/R, risk.
+- If all volume ratios are below regular-session confirmation levels, state that no A-grade setups are confirmed.
 
 ---
 
