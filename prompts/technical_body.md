@@ -430,6 +430,20 @@ Discord formatting rules:
 - Keep each ticker summary compact: setup, score, market cap, trend, momentum, RS vs QQQ, levels, entry/stop/target, R/R, risk.
 - If all volume ratios are below regular-session confirmation levels, state that no A-grade setups are confirmed.
 
+Each ticker must use separate lines for:
+
+- Trend / Momentum / RS vs QQQ
+
+- Levels
+
+- Entry Zone / Stop / Target
+
+- Est. R/R
+
+- Risk
+
+Never combine RS vs QQQ and Risk on the same line.
+
 ---
 
 ## STRUCTURED OUTPUT
