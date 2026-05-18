@@ -123,6 +123,7 @@ def run_technical(
     per: dict[str, Any] = {}
     qqq = fetch_ohlcv("QQQ", period="6mo")
     qqq_last = float(qqq["Close"].iloc[-1]) if not qqq.empty else None
+
     for sym in tickers:
         df = ohlcv_for_ticker(sym)
         feats = compute_ta_features(df)
@@ -145,14 +146,12 @@ def run_technical(
         max_tokens=8192,
         timeout_seconds=300.0,
     )
-    md = _resolve_technical_discord_markdown(raw) or "_No TA output_"
 
-# Market cap is already included per ticker by the Technical Agent prompt.
-# Do not append the duplicate market cap footer.
-# md = md.rstrip() + _discord_market_cap_snapshot(per)
+    print("TECHNICAL RAW RESPONSE:")
+    print(raw)
 
-md = md.rstrip()
-structured = raw.get("structured")
+    md = (_resolve_technical_discord_markdown(raw) or "_No TA output_").rstrip()
+    structured = raw.get("structured")
     if not isinstance(structured, dict):
         structured = {"scores": {}, "notes": ""}
     structured = {**structured, "inputs": per}
