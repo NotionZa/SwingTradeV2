@@ -10,7 +10,6 @@ from swingtrade.integrations.anthropic_client import complete_json_agent
 from swingtrade.integrations.newsapi_client import (
     news_query_for_equity,
     newsapi_headlines,
-    newsapi_macro_merged,
 )
 from swingtrade.integrations.reddit_client import make_reddit_client, reddit_search_snippets
 from swingtrade.models.agents import AgentResult, RunContext
@@ -32,22 +31,8 @@ def run_sentiment(
             "Reddit is separate (REDDIT_* vars)."
         )
     reddit = make_reddit_client(settings)
-    macro_queries = settings.macro_news_queries()
-    bundle: dict[str, Any] = {
-        "macro_queries": macro_queries,
-    }
+    bundle: dict[str, Any] = {}
     with httpx.Client(timeout=settings.http_timeout_seconds) as http:
-        macro_articles = newsapi_macro_merged(
-            settings,
-            http,
-            macro_queries,
-            per_query_size=6,
-            max_total=20,
-        )
-        bundle["macro_articles"] = [
-            {"title": a.get("title"), "source": (a.get("source") or {}).get("name")}
-            for a in macro_articles
-        ]
         per: dict[str, Any] = {}
         for sym in tickers:
             q = news_query_for_equity(sym)
@@ -64,8 +49,8 @@ def run_sentiment(
 
     with_news = sum(1 for v in per.values() if v.get("news"))
     logger.info(
-        "Sentiment news: macro_articles=%s tickers=%s with_any_headline=%s (NewsAPI per ticker; raise --max-tickers to cover more names)",
-        len(bundle["macro_articles"]),
+        "Sentiment news: tickers=%s with_any_headline=%s "
+        "(NewsAPI per ticker only; macro moved to Market Sentiment)",
         len(tickers),
         with_news,
     )
