@@ -248,8 +248,7 @@ def _format_ta_discord_grouped_from_structured(structured: dict[str, Any], sessi
     lines = [
         f"⚡ **SwingTrader — Technical Analysis | {session_l}**",
         "",
-        "**Session Note:** Fallback generated from structured output. "
-        "Review scores and levels; model markdown was unavailable.",
+        "**Session Note:** Watchlist formatted from structured ticker analysis (Python builder).",
         "",
     ]
     lines.extend(
@@ -498,36 +497,42 @@ def _resolve_technical_discord_markdown(
     session: str | None = None,
     per: dict[str, Any] | None = None,
 ) -> str:
-    """Resolve Discord markdown: model output first, then deterministic fallbacks."""
+    """Resolve Discord markdown: structured.tickers (Python) first, then model markdown, then fallbacks."""
     session_key = session or "unknown"
-    md = str(raw.get("discord_markdown", "")).strip()
-    if md:
-        return md
-
     structured = raw.get("structured")
     if not isinstance(structured, dict):
         structured = {}
 
+    grouped = _format_ta_discord_grouped_from_structured(structured, session_key)
+    if grouped:
+        logger.info(
+            "Technical agent: watchlist markdown built from structured.tickers (Python formatter)"
+        )
+        return grouped
+
     nested_md = structured.get("discord_markdown")
     if isinstance(nested_md, str) and nested_md.strip():
+        logger.warning(
+            "Technical agent: using structured.discord_markdown (structured.tickers unavailable)"
+        )
         return nested_md.strip()
+
+    raw_md = str(raw.get("discord_markdown", "")).strip()
+    if raw_md:
+        logger.warning(
+            "Technical agent: using raw discord_markdown (structured.tickers unavailable)"
+        )
+        return raw_md
 
     if not isinstance(structured.get("scores"), dict) or not structured.get("scores"):
         flat = _flat_scores_from_raw(raw)
         if flat:
             structured = {**structured, "scores": flat}
 
-    grouped = _format_ta_discord_grouped_from_structured(structured, session_key)
-    if grouped:
-        logger.warning(
-            "Technical agent: empty discord_markdown; built grouped watchlist from structured.tickers"
-        )
-        return grouped
-
     scores_only = _format_ta_discord_scores_only(structured, session_key)
     if scores_only:
         logger.warning(
-            "Technical agent: empty discord_markdown; built score-only watchlist from structured.scores"
+            "Technical agent: built score-only watchlist from structured.scores"
         )
         return scores_only
 
@@ -539,7 +544,7 @@ def _resolve_technical_discord_markdown(
         return features_md
 
     logger.warning(
-        "Technical agent: no discord_markdown, structured output, or local features to format"
+        "Technical agent: no structured.tickers, model markdown, scores, or local features to format"
     )
     return ""
 
