@@ -4,7 +4,7 @@
 
 | Key | Type | Purpose |
 |-----|------|---------|
-| `discord_markdown` | string | Morning briefing letter for Discord #daily-briefing channel |
+| `discord_markdown` | string | Morning briefing letter for Discord #daily-briefing (the app appends `structured.reasoning` as a readable section — do not repeat it here) |
 | `structured` | object | Machine fields for CIO agent — see below |
 
 ## `structured` required fields
@@ -20,6 +20,17 @@
 | `trading_bias` | string | Which strategies are favoured and why |
 | `key_levels` | string | Important QQQ levels or ranges worth watching with explanation of why they matter |
 | `opex_note` | string | OPEX date and days until it. If within 3 days explain the volatility risk in plain English. If more than 3 days away just note the date. |
+| `reasoning` | object | **Required.** Analytical reasoning behind the regime call — see format below. Do not omit. |
+
+## `structured.reasoning` required fields
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `why_this_regime` | string | Why this regime and not the closest alternative. Always name the alternative you considered and explain why you rejected it |
+| `key_tell` | string | The single most important data point that drove the regime call. Be specific - include numbers |
+| `confidence_rationale` | string | Why this confidence score and not higher or lower. What would push it up, what would push it down |
+| `primary_catalyst` | string | The most important news headline and why it outweighs the others |
+| `what_changes_the_call` | string | What would you need to see to change the regime classification |
 
 ## `macro_catalysts` array format
 Each catalyst must be an object with:
@@ -29,6 +40,7 @@ Each catalyst must be an object with:
 | `event` | string | Name of the event e.g. "Fed speaker 2PM ET" |
 | `impact` | string | One of: `bullish`, `bearish`, `neutral`, `watch` |
 | `explanation` | string | Plain English - what is this event and why does it matter for tech stocks |
+
 
 ## Minimal example
 
@@ -50,7 +62,14 @@ Each catalyst must be an object with:
     "sector_strength_notes": "Semiconductors are leading the market via SOXX outperformance. This is a positive signal because semis are the highest-beta part of tech - when institutions are buying semis it means they have high conviction in the tech rally. Mega-cap tech holding steady. Small and mid-cap tech lagging which is normal in an early-stage rally.",
     "trading_bias": "Momentum and breakout strategies favoured. Full position sizing appropriate for high conviction setups. Avoid mean reversion trades today as the trend is your friend. Reduce size or step aside if Fed speaker sounds hawkish.",
     "key_levels": "QQQ support at 480 - this is where buyers have stepped in multiple times recently, a break below here would be a warning sign. Resistance at 492 - the recent high where sellers appeared. A clean break above 492 with volume opens a run toward 500.",
-    "opex_note": "Next OPEX is June 20th — 2 days away. Options expiry (the date when options contracts expire) often causes unusual volume and choppy price action as traders rush to close or roll their positions. Keep position sizes slightly smaller than usual and expect wider price swings."
+    "opex_note": "Next OPEX is June 20th — 2 days away. Options expiry often causes choppy price action as traders close or roll positions.",
+    "reasoning": {
+      "why_this_regime": "Classified bull_trending rather than choppy because QQQ is above its 20-day range midline and VIX is compressing, not expanding.",
+      "key_tell": "SOXX week_change_pct outperforming QQQ by a wide margin — institutions are buying semis first.",
+      "confidence_rationale": "8/10 because trend and vol align; would drop to 5/10 if VIX broke above 20 or QQQ lost the 480 support.",
+      "primary_catalyst": "Fed speaker 2PM ET — rate-path guidance can override the tape for tech multiples today.",
+      "what_changes_the_call": "A hawkish Fed tone plus QQQ closing below 480 would flip this to choppy or risk_off."
+    }
   }
 }
 ```

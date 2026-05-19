@@ -17,6 +17,40 @@ from swingtrade.settings import Settings
 
 logger = logging.getLogger(__name__)
 
+_REASONING_FIELDS: tuple[tuple[str, str], ...] = (
+    ("why_this_regime", "Why this regime"),
+    ("key_tell", "Key tell"),
+    ("confidence_rationale", "Confidence"),
+    ("primary_catalyst", "Primary catalyst"),
+    ("what_changes_the_call", "What would change the call"),
+)
+
+
+def _format_reasoning_section(reasoning: Any) -> str:
+    """Readable markdown block from structured.reasoning for Discord."""
+    if not isinstance(reasoning, dict):
+        return ""
+    bullets: list[str] = []
+    for key, label in _REASONING_FIELDS:
+        val = reasoning.get(key)
+        if isinstance(val, str) and val.strip():
+            bullets.append(f"**{label}:** {val.strip()}")
+    if not bullets:
+        return ""
+    return "\n".join(
+        ["", "---", "", "## Why we called it this way", ""] + bullets
+    )
+
+
+def _append_reasoning_to_discord(md: str, structured: dict[str, Any]) -> str:
+    block = _format_reasoning_section(structured.get("reasoning"))
+    if not block:
+        return md
+    base = md.rstrip()
+    if "## Why we called it this way" in base:
+        return md
+    return base + block
+
 
 def _format_ms_discord_from_structured(structured: dict[str, Any]) -> str:
     """Build daily-briefing markdown when the model omits or truncates discord_markdown."""
@@ -66,6 +100,9 @@ def _format_ms_discord_from_structured(structured: dict[str, Any]) -> str:
             if explanation:
                 bullet += f" — {explanation}"
             lines.append(bullet)
+    reasoning_block = _format_reasoning_section(structured.get("reasoning"))
+    if reasoning_block:
+        lines.append(reasoning_block)
     lines.extend(["", "Trade well. Manage your risk."])
     return "\n".join(lines)
 
@@ -122,10 +159,11 @@ def run_market_sentiment(
         max_tokens=4096,
         timeout_seconds=120.0,
     )
-    md = _resolve_market_sentiment_discord_markdown(raw) or "_No output_"
     structured = raw.get("structured")
     if not isinstance(structured, dict):
         structured = {}
+    md = _resolve_market_sentiment_discord_markdown(raw) or "_No output_"
+    md = _append_reasoning_to_discord(md, structured)
     return AgentResult(
         agent_id="market_sentiment",
         discord_markdown=md,
