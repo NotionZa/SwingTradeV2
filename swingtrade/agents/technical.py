@@ -20,6 +20,26 @@ logger = logging.getLogger(__name__)
 
 _NO_CLEAN_SETUP = "No Clean Setup"
 _NO_TRADE = "No Trade"
+_BROKEN_TREND = "Broken"
+_UNDERPERFORMING_RS = "Underperforming"
+_BREAKOUT = "Breakout"
+_SETUP_A = "A"
+
+_CAP_RR_BELOW_25 = 6.9
+_CAP_NO_CLEAN_OR_NO_TRADE_OR_BROKEN = 4.9
+_CAP_UNDERPERFORMING_RS = 6.5
+_CAP_INCOMPLETE_LEVELS = 5.9
+_CAP_PREMARKET_WEAK_VOLUME = 7.4
+
+_PREMARKET_WEAK_VOLUME_PHRASES = (
+    "pre-market",
+    "premarket",
+    "low volume",
+    "thin volume",
+    "below confirmation",
+    "volume ratio below",
+    "volume <",
+)
 
 
 def _format_usd_compact(n: float) -> str:
@@ -64,6 +84,166 @@ def _row_str(row: dict[str, Any], key: str) -> str | None:
         return None
     s = str(v).strip()
     return s if s else None
+
+
+def _level_field_missing(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str) and not value.strip():
+        return True
+    return False
+
+
+def _row_text_blob(row: dict[str, Any]) -> str:
+    parts: list[str] = []
+    vc = row.get("volume_confirmation")
+    if isinstance(vc, str) and vc.strip():
+        parts.append(vc)
+    risks = row.get("technical_risks")
+    if isinstance(risks, list):
+        parts.extend(str(r) for r in risks if r is not None)
+    for key in ("summary", "cio_notes"):
+        t = row.get(key)
+        if isinstance(t, str) and t.strip():
+            parts.append(t)
+    return " ".join(parts).lower()
+
+
+def _weak_premarket_volume(row: dict[str, Any], session: str | None) -> bool:
+    if session != "pre_market":
+        return False
+    blob = _row_text_blob(row)
+    return any(phrase in blob for phrase in _PREMARKET_WEAK_VOLUME_PHRASES)
+
+
+def _cap_score(score: float, cap: float, reasons: list[str], reason: str) -> float:
+    if score > cap:
+        reasons.append(reason)
+        return cap
+    return score
+
+
+def _apply_ta_score_caps_to_row(
+    row: dict[str, Any],
+    session: str | None = None,
+) -> dict[str, Any]:
+    """Apply deterministic downward TA score caps; never raises scores."""
+    out = dict(row)
+    original = _as_float(out.get("ta_score"))
+    if original is None:
+        return out
+
+    score = original
+    reasons: list[str] = []
+
+    rr = _as_float(out.get("risk_reward"))
+    if rr is not None and rr < 2.5:
+        score = _cap_score(
+            score,
+            _CAP_RR_BELOW_25,
+            reasons,
+            f"Risk/reward below 2.5 capped TA score at {_CAP_RR_BELOW_25}",
+        )
+
+    if (_row_str(out, "strategy_match") or "") == _NO_CLEAN_SETUP:
+        score = _cap_score(
+            score,
+            _CAP_NO_CLEAN_OR_NO_TRADE_OR_BROKEN,
+            reasons,
+            f"No Clean Setup capped TA score at {_CAP_NO_CLEAN_OR_NO_TRADE_OR_BROKEN}",
+        )
+
+    if (_row_str(out, "setup_quality") or "") == _NO_TRADE:
+        score = _cap_score(
+            score,
+            _CAP_NO_CLEAN_OR_NO_TRADE_OR_BROKEN,
+            reasons,
+            f"No Trade setup quality capped TA score at {_CAP_NO_CLEAN_OR_NO_TRADE_OR_BROKEN}",
+        )
+
+    if (_row_str(out, "trend_status") or "") == _BROKEN_TREND:
+        score = _cap_score(
+            score,
+            _CAP_NO_CLEAN_OR_NO_TRADE_OR_BROKEN,
+            reasons,
+            f"Broken trend capped TA score at {_CAP_NO_CLEAN_OR_NO_TRADE_OR_BROKEN}",
+        )
+
+    rs = _row_str(out, "relative_strength_vs_qqq") or ""
+    strat = _row_str(out, "strategy_match") or ""
+    qual = _row_str(out, "setup_quality") or ""
+    if rs == _UNDERPERFORMING_RS and not (strat == _BREAKOUT and qual == _SETUP_A):
+        score = _cap_score(
+            score,
+            _CAP_UNDERPERFORMING_RS,
+            reasons,
+            f"Underperforming vs QQQ capped TA score at {_CAP_UNDERPERFORMING_RS}",
+        )
+
+    if (
+        _level_field_missing(out.get("suggested_entry_zone"))
+        or _level_field_missing(out.get("suggested_stop_loss"))
+        or _level_field_missing(out.get("suggested_target"))
+    ):
+        score = _cap_score(
+            score,
+            _CAP_INCOMPLETE_LEVELS,
+            reasons,
+            f"Incomplete entry/stop/target capped TA score at {_CAP_INCOMPLETE_LEVELS}",
+        )
+
+    if _weak_premarket_volume(out, session):
+        score = _cap_score(
+            score,
+            _CAP_PREMARKET_WEAK_VOLUME,
+            reasons,
+            f"Pre-market weak volume capped TA score at {_CAP_PREMARKET_WEAK_VOLUME}",
+        )
+
+    score = round(score, 1)
+    original_r = round(original, 1)
+
+    if score != original_r:
+        out["model_ta_score"] = original_r
+        out["score_cap_reasons"] = reasons
+    elif "score_cap_reasons" not in out:
+        out["score_cap_reasons"] = []
+
+    out["ta_score"] = score
+    return out
+
+
+def _apply_ta_score_caps(
+    structured: dict[str, Any],
+    session: str | None = None,
+) -> dict[str, Any]:
+    """Cap all structured.tickers rows and sync structured.scores."""
+    if not isinstance(structured, dict):
+        return structured
+
+    tickers_in = structured.get("tickers")
+    tickers: dict[str, Any] = {}
+    if isinstance(tickers_in, dict):
+        for sym, row in tickers_in.items():
+            if isinstance(row, dict):
+                tickers[str(sym)] = _apply_ta_score_caps_to_row(row, session)
+            else:
+                tickers[str(sym)] = row
+
+    scores: dict[str, Any] = {}
+    existing_scores = structured.get("scores")
+    if isinstance(existing_scores, dict):
+        scores.update(existing_scores)
+
+    for sym, row in tickers.items():
+        if not isinstance(row, dict):
+            continue
+        key = _row_str(row, "ticker") or sym
+        capped = _as_float(row.get("ta_score"))
+        if capped is not None:
+            scores[key] = round(capped, 1)
+
+    return {**structured, "tickers": tickers, "scores": scores}
 
 
 def _normalize_ticker_rows(structured: dict[str, Any]) -> list[tuple[str, dict[str, Any], float | None]]:
@@ -601,12 +781,15 @@ def run_technical(
         timeout_seconds=300.0,
     )
 
-    md = (
-        _resolve_technical_discord_markdown(raw, ctx.session, per) or "_No TA output_"
-    ).rstrip()
     structured = raw.get("structured")
     if not isinstance(structured, dict):
         structured = {"scores": {}, "notes": ""}
+    structured = _apply_ta_score_caps(structured, ctx.session)
+    raw = {**raw, "structured": structured}
+
+    md = (
+        _resolve_technical_discord_markdown(raw, ctx.session, per) or "_No TA output_"
+    ).rstrip()
     structured = {**structured, "inputs": per}
     return AgentResult(
         agent_id="technical_analysis",
