@@ -18,6 +18,9 @@ from swingtrade.settings import Settings
 
 logger = logging.getLogger(__name__)
 
+_NO_CLEAN_SETUP = "No Clean Setup"
+_NO_TRADE = "No Trade"
+
 
 def _format_usd_compact(n: float) -> str:
     sign = "-" if n < 0 else ""
@@ -33,64 +36,510 @@ def _format_usd_compact(n: float) -> str:
     return f"{sign}${x:,.0f}"
 
 
-def _format_ta_discord_from_structured(structured: dict[str, Any]) -> str:
-    """Build watchlist table when the model omits or empties discord_markdown."""
+def _session_label(session: str) -> str:
+    return str(session).replace("_", " ").title()
+
+
+def _as_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return float(int(value))
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        try:
+            return float(s)
+        except ValueError:
+            return None
+    return None
+
+
+def _row_str(row: dict[str, Any], key: str) -> str | None:
+    v = row.get(key)
+    if v is None:
+        return None
+    s = str(v).strip()
+    return s if s else None
+
+
+def _normalize_ticker_rows(structured: dict[str, Any]) -> list[tuple[str, dict[str, Any], float | None]]:
     tickers = structured.get("tickers")
     if not isinstance(tickers, dict) or not tickers:
-        return ""
-    lines = [
-        "| Ticker | Mkt Cap | Setup | TA Score | Trend | Momentum | RS vs QQQ | Key Levels | Risk |",
-        "|---|---:|---|---:|---|---|---|---|---|",
-    ]
-    for sym in sorted(tickers):
-        row = tickers[sym]
+        return []
+    out: list[tuple[str, dict[str, Any], float | None]] = []
+    for sym, row in tickers.items():
         if not isinstance(row, dict):
             continue
-        ks, kr = row.get("key_support"), row.get("key_resistance")
-        level_parts: list[str] = []
-        if ks is not None:
-            level_parts.append(f"S: {ks}")
-        if kr is not None:
-            level_parts.append(f"R: {kr}")
-        levels = " / ".join(level_parts) if level_parts else "—"
-        risks = row.get("technical_risks")
-        if isinstance(risks, list) and risks:
-            risk = "; ".join(str(r) for r in risks[:2])
+        symbol = _row_str(row, "ticker") or str(sym).strip()
+        if not symbol:
+            continue
+        out.append((symbol, row, _as_float(row.get("ta_score"))))
+    return out
+
+
+def _is_no_clean_setup_row(row: dict[str, Any], score: float | None) -> bool:
+    setup = _row_str(row, "strategy_match") or ""
+    quality = _row_str(row, "setup_quality") or ""
+    if setup == _NO_CLEAN_SETUP:
+        return True
+    if quality == _NO_TRADE:
+        return True
+    if score is not None and score < 5.0:
+        return True
+    return False
+
+
+def _is_strongest_candidate(row: dict[str, Any], score: float | None) -> bool:
+    if score is None or score < 7.0:
+        return False
+    setup = _row_str(row, "strategy_match") or ""
+    quality = _row_str(row, "setup_quality") or ""
+    if setup == _NO_CLEAN_SETUP:
+        return False
+    if quality == _NO_TRADE:
+        return False
+    return True
+
+
+def _is_watchlist_candidate(row: dict[str, Any], score: float | None) -> bool:
+    if _is_no_clean_setup_row(row, score):
+        return False
+    quality = (_row_str(row, "setup_quality") or "").upper()
+    if quality in ("B", "C"):
+        return True
+    if score is not None and 5.0 <= score <= 6.9:
+        return True
+    if score is not None and score >= 5.0:
+        return True
+    return False
+
+
+def _levels_line(row: dict[str, Any]) -> str | None:
+    ks, kr = row.get("key_support"), row.get("key_resistance")
+    parts: list[str] = []
+    if ks is not None and str(ks).strip():
+        parts.append(f"Support: {ks}")
+    if kr is not None and str(kr).strip():
+        parts.append(f"Resistance: {kr}")
+    return " | ".join(parts) if parts else None
+
+
+def _trade_plan_line(row: dict[str, Any]) -> str | None:
+    parts: list[str] = []
+    entry = _row_str(row, "suggested_entry_zone")
+    stop = row.get("suggested_stop_loss")
+    target = row.get("suggested_target")
+    rr = row.get("risk_reward")
+    if entry:
+        parts.append(f"Entry: {entry}")
+    if stop is not None and str(stop).strip():
+        parts.append(f"Stop: {stop}")
+    if target is not None and str(target).strip():
+        parts.append(f"Target: {target}")
+    if rr is not None and str(rr).strip():
+        parts.append(f"R/R: {rr}")
+    return " | ".join(parts) if parts else None
+
+
+def _risks_line(row: dict[str, Any]) -> str | None:
+    risks = row.get("technical_risks")
+    if isinstance(risks, list):
+        items = [str(r).strip() for r in risks if r is not None and str(r).strip()]
+        if items:
+            return "Risks: " + "; ".join(items[:2])
+    summary = _row_str(row, "summary")
+    if summary:
+        return f"Note: {summary[:120]}"
+    return None
+
+
+def _format_ticker_block(symbol: str, row: dict[str, Any]) -> list[str]:
+    """Grouped bullet block for one ticker (no markdown tables)."""
+    score = _as_float(row.get("ta_score"))
+    score_s = f"{score:.1f}" if score is not None else "N/A"
+    setup = _row_str(row, "strategy_match") or "N/A"
+    quality = _row_str(row, "setup_quality") or "N/A"
+    cap = _row_str(row, "market_cap_human") or "N/A"
+    trend = _row_str(row, "trend_status") or "N/A"
+    mom = _row_str(row, "momentum_status") or "N/A"
+    rs = _row_str(row, "relative_strength_vs_qqq") or "N/A"
+
+    lines = [
+        f"**{symbol}**",
+        f"- Setup: {setup} | TA: {score_s} | Quality: {quality}",
+        f"- Mkt cap: {cap}",
+        f"- Trend: {trend} | Momentum: {mom} | RS vs QQQ: {rs}",
+    ]
+    levels = _levels_line(row)
+    if levels:
+        lines.append(f"- {levels}")
+    plan = _trade_plan_line(row)
+    if plan:
+        lines.append(f"- {plan}")
+    risk = _risks_line(row)
+    if risk:
+        lines.append(f"- {risk}")
+    return lines
+
+
+def _partition_ticker_rows(
+    rows: list[tuple[str, dict[str, Any], float | None]],
+) -> tuple[
+    list[tuple[str, dict[str, Any], float | None]],
+    list[tuple[str, dict[str, Any], float | None]],
+    list[tuple[str, dict[str, Any], float | None]],
+]:
+    strongest_pool = [
+        item for item in rows if _is_strongest_candidate(item[1], item[2])
+    ]
+    strongest_pool.sort(key=lambda x: (x[2] if x[2] is not None else -1.0), reverse=True)
+    strongest = strongest_pool[:3]
+    strongest_syms = {s for s, _, _ in strongest}
+
+    remaining = [item for item in rows if item[0] not in strongest_syms]
+
+    no_clean: list[tuple[str, dict[str, Any], float | None]] = []
+    watchlist: list[tuple[str, dict[str, Any], float | None]] = []
+
+    for item in remaining:
+        sym, row, score = item
+        if _is_no_clean_setup_row(row, score):
+            no_clean.append(item)
+        elif _is_watchlist_candidate(row, score):
+            watchlist.append(item)
         else:
-            risk = str(row.get("summary") or "—")[:100]
-        lines.append(
-            "| {ticker} | {cap} | {setup} | {score} | {trend} | {mom} | {rs} | {levels} | {risk} |".format(
-                ticker=row.get("ticker", sym),
-                cap=row.get("market_cap_human", "N/A"),
-                setup=row.get("strategy_match", "—"),
-                score=row.get("ta_score", "—"),
-                trend=row.get("trend_status", "—"),
-                mom=row.get("momentum_status", "—"),
-                rs=row.get("relative_strength_vs_qqq", "—"),
-                levels=levels,
-                risk=risk,
-            )
+            no_clean.append(item)
+
+    watchlist.sort(key=lambda x: (x[2] if x[2] is not None else -1.0), reverse=True)
+    no_clean.sort(key=lambda x: (x[2] if x[2] is not None else -1.0), reverse=True)
+    return strongest, watchlist, no_clean
+
+
+def _section_blocks(
+    title: str,
+    items: list[tuple[str, dict[str, Any], float | None]],
+    *,
+    empty_line: str,
+) -> list[str]:
+    lines = [title, ""]
+    if not items:
+        lines.append(empty_line)
+        lines.append("")
+        return lines
+    for sym, row, _ in items:
+        lines.extend(_format_ticker_block(sym, row))
+        lines.append("")
+    return lines
+
+
+def _format_ta_discord_grouped_from_structured(structured: dict[str, Any], session: str) -> str:
+    """Deterministic grouped-bullet watchlist post from structured.tickers."""
+    rows = _normalize_ticker_rows(structured)
+    if not rows:
+        return ""
+
+    strongest, watchlist, no_clean = _partition_ticker_rows(rows)
+    session_l = _session_label(session)
+
+    lines = [
+        f"⚡ **SwingTrader — Technical Analysis | {session_l}**",
+        "",
+        "**Session Note:** Fallback generated from structured output. "
+        "Review scores and levels; model markdown was unavailable.",
+        "",
+    ]
+    lines.extend(
+        _section_blocks(
+            "🟢 **Strongest Setups**",
+            strongest,
+            empty_line="_None in this bucket._",
         )
+    )
+    lines.extend(
+        _section_blocks(
+            "🟡 **Watchlist / Needs Confirmation**",
+            watchlist,
+            empty_line="_None in this bucket._",
+        )
+    )
+    lines.extend(
+        _section_blocks(
+            "🔴 **No Clean Setup**",
+            no_clean,
+            empty_line="_None in this bucket._",
+        )
+    )
+
+    notes = structured.get("notes")
+    lines.append("📝 **Cross-Cutting Notes**")
+    lines.append("")
+    if isinstance(notes, str) and notes.strip():
+        lines.append(notes.strip())
+    else:
+        lines.append("_No cross-cutting notes._")
+
+    return "\n".join(lines).strip()
+
+
+def _features_usable(feats: Any) -> bool:
+    if not isinstance(feats, dict) or not feats:
+        return False
+    if feats.get("error"):
+        return False
+    return feats.get("last_close") is not None
+
+
+def _rough_feature_score(feats: dict[str, Any]) -> float | None:
+    """Heuristic 0–10 screen from local indicators (not model TA score)."""
+    if not _features_usable(feats):
+        return None
+    score = 5.0
+    rsi = _as_float(feats.get("rsi_14"))
+    if rsi is not None:
+        if 50.0 <= rsi <= 70.0:
+            score += 1.0
+        elif rsi > 70.0:
+            score += 0.5
+        elif rsi < 30.0:
+            score += 0.5
+    macd = _as_float(feats.get("macd"))
+    macd_sig = _as_float(feats.get("macd_signal"))
+    if macd is not None and macd_sig is not None and macd > macd_sig:
+        score += 0.5
+    last = _as_float(feats.get("last_close"))
+    bb_mid = _as_float(feats.get("bb_mid"))
+    if last is not None and bb_mid is not None and last > bb_mid:
+        score += 0.5
+    vol_ratio = _as_float(feats.get("volume_ratio"))
+    if vol_ratio is not None and vol_ratio >= 1.0:
+        score += 0.3
+    return min(score, 10.0)
+
+
+def _feature_risk_note(feats: dict[str, Any]) -> str:
+    notes: list[str] = []
+    rsi = _as_float(feats.get("rsi_14"))
+    if rsi is not None and rsi > 70.0:
+        notes.append("RSI extended")
+    if rsi is not None and rsi < 30.0:
+        notes.append("RSI oversold")
+    vol_ratio = _as_float(feats.get("volume_ratio"))
+    if vol_ratio is not None and vol_ratio < 0.8:
+        notes.append("weak volume")
+    last = _as_float(feats.get("last_close"))
+    bb_upper = _as_float(feats.get("bb_upper"))
+    if last is not None and bb_upper is not None and last >= bb_upper * 0.99:
+        notes.append("near upper Bollinger")
+    if not notes:
+        return "Basic feature fallback only — no model-derived setup classification."
+    return "; ".join(notes)
+
+
+def _format_feature_ticker_block(sym: str, block: dict[str, Any], rough: float | None) -> list[str]:
+    feats = block.get("features") if isinstance(block.get("features"), dict) else {}
+    yfq = block.get("yfinance_quote") if isinstance(block.get("yfinance_quote"), dict) else {}
+    score_s = f"{rough:.1f}" if rough is not None else "N/A"
+
+    cap = "N/A"
+    mc = yfq.get("market_cap_usd")
+    if mc is not None:
+        try:
+            cap = _format_usd_compact(float(mc))
+        except (TypeError, ValueError):
+            pass
+
+    last = _as_float(feats.get("last_close"))
+    last_s = f"{last:.2f}" if last is not None else "N/A"
+
+    lines = [
+        f"**{sym}**",
+        f"- Screen score (local): {score_s} | Mkt cap: {cap} | Last: {last_s}",
+    ]
+
+    rsi = _as_float(feats.get("rsi_14"))
+    if rsi is not None:
+        lines.append(f"- RSI(14): {rsi:.1f}")
+
+    macd = _as_float(feats.get("macd"))
+    macd_sig = _as_float(feats.get("macd_signal"))
+    if macd is not None and macd_sig is not None:
+        lines.append(f"- MACD: {macd:.3f} | Signal: {macd_sig:.3f}")
+
+    bb_mid = _as_float(feats.get("bb_mid"))
+    bb_upper = _as_float(feats.get("bb_upper"))
+    bb_lower = _as_float(feats.get("bb_lower"))
+    if last is not None and bb_mid is not None:
+        bb_parts = [f"mid {bb_mid:.2f}"]
+        if bb_upper is not None:
+            bb_parts.append(f"upper {bb_upper:.2f}")
+        if bb_lower is not None:
+            bb_parts.append(f"lower {bb_lower:.2f}")
+        lines.append(f"- vs Bollinger: last {last:.2f} | " + " / ".join(bb_parts))
+
+    vol_ratio = _as_float(feats.get("volume_ratio"))
+    if vol_ratio is not None:
+        lines.append(f"- Volume ratio (20d): {vol_ratio:.2f}x")
+
+    rel = _as_float(block.get("vs_qqq_close_ratio"))
+    if rel is not None:
+        lines.append(f"- vs QQQ close ratio: {rel:.4f}")
+
+    lines.append(f"- {_feature_risk_note(feats)}")
+    return lines
+
+
+def _format_ta_discord_from_features(
+    per: dict[str, Any],
+    session: str | None = None,
+) -> str:
+    """Last-resort watchlist from locally computed per-ticker features."""
+    if not isinstance(per, dict) or not per:
+        return ""
+
+    ranked: list[tuple[str, dict[str, Any], float | None]] = []
+    for sym, block in per.items():
+        if not isinstance(block, dict):
+            continue
+        feats = block.get("features")
+        if not _features_usable(feats):
+            continue
+        ranked.append((str(sym).strip(), block, _rough_feature_score(feats)))
+
+    if not ranked:
+        return ""
+
+    ranked.sort(
+        key=lambda x: (x[2] if x[2] is not None else -1.0),
+        reverse=True,
+    )
+    session_l = _session_label(session or "unknown")
+
+    lines = [
+        f"⚡ **SwingTrader — Technical Analysis | {session_l}**",
+        "",
+        "**Session Note:** Fallback generated from local technical features because "
+        "model markdown/structured output was unavailable. Treat as a basic technical screen.",
+        "",
+        "🟢 **Top Technical Scores**",
+        "",
+    ]
+    for sym, block, rough in ranked:
+        lines.extend(_format_feature_ticker_block(sym, block, rough))
+        lines.append("")
+
+    lines.append(
+        "_Basic feature fallback only — no model-derived setup classification._"
+    )
+    return "\n".join(lines).strip()
+
+
+def _format_ta_discord_scores_only(structured: dict[str, Any], session: str) -> str:
+    """Score-only fallback when structured.tickers is missing."""
+    scores = structured.get("scores")
+    if not isinstance(scores, dict) or not scores:
+        return ""
+
+    ranked: list[tuple[str, float]] = []
+    for sym, val in scores.items():
+        score = _as_float(val)
+        if score is None:
+            continue
+        ranked.append((str(sym).strip(), score))
+    if not ranked:
+        return ""
+
+    ranked.sort(key=lambda x: x[1], reverse=True)
+    session_l = _session_label(session)
+
+    lines = [
+        f"⚡ **SwingTrader — Technical Analysis | {session_l}**",
+        "",
+        "**Session Note:** Full ticker structure was unavailable, but score output was returned.",
+        "",
+        "🟢 **Top TA Scores**",
+        "",
+    ]
+    for sym, score in ranked[:15]:
+        lines.append(f"- {sym} — {score:.1f}")
+    lines.append("")
+    lines.append("📝 **Cross-Cutting Notes**")
+    lines.append("")
     notes = structured.get("notes")
     if isinstance(notes, str) and notes.strip():
-        lines.extend(["", f"**Themes:** {notes.strip()}"])
-    return "\n".join(lines)
+        lines.append(notes.strip())
+    else:
+        lines.append("_No cross-cutting notes._")
+    lines.extend(
+        [
+            "",
+            "_No detailed levels available. Re-run with fewer tickers if full setup detail is needed._",
+        ]
+    )
+    return "\n".join(lines).strip()
 
 
-def _resolve_technical_discord_markdown(raw: dict[str, Any]) -> str:
+def _flat_scores_from_raw(raw: dict[str, Any]) -> dict[str, Any]:
+    """Some model replies put ticker scores at top level instead of structured.scores."""
+    out: dict[str, Any] = {}
+    for key, val in raw.items():
+        if key in ("discord_markdown", "structured"):
+            continue
+        if _as_float(val) is not None:
+            out[str(key)] = val
+    return out
+
+
+def _resolve_technical_discord_markdown(
+    raw: dict[str, Any],
+    session: str | None = None,
+    per: dict[str, Any] | None = None,
+) -> str:
+    """Resolve Discord markdown: model output first, then deterministic fallbacks."""
+    session_key = session or "unknown"
     md = str(raw.get("discord_markdown", "")).strip()
     if md:
         return md
+
     structured = raw.get("structured")
-    if isinstance(structured, dict):
-        built = _format_ta_discord_from_structured(structured)
-        if built:
-            logger.warning(
-                "Technical agent returned empty discord_markdown; built table from structured.tickers"
-            )
-            return built
+    if not isinstance(structured, dict):
+        structured = {}
+
+    nested_md = structured.get("discord_markdown")
+    if isinstance(nested_md, str) and nested_md.strip():
+        return nested_md.strip()
+
+    if not isinstance(structured.get("scores"), dict) or not structured.get("scores"):
+        flat = _flat_scores_from_raw(raw)
+        if flat:
+            structured = {**structured, "scores": flat}
+
+    grouped = _format_ta_discord_grouped_from_structured(structured, session_key)
+    if grouped:
+        logger.warning(
+            "Technical agent: empty discord_markdown; built grouped watchlist from structured.tickers"
+        )
+        return grouped
+
+    scores_only = _format_ta_discord_scores_only(structured, session_key)
+    if scores_only:
+        logger.warning(
+            "Technical agent: empty discord_markdown; built score-only watchlist from structured.scores"
+        )
+        return scores_only
+
+    features_md = _format_ta_discord_from_features(per or {}, session)
+    if features_md:
+        logger.warning(
+            "Technical agent: built watchlist from local per-ticker features (model output unusable)"
+        )
+        return features_md
+
     logger.warning(
-        "Technical agent returned empty discord_markdown and no structured.tickers to fall back on"
+        "Technical agent: no discord_markdown, structured output, or local features to format"
     )
     return ""
 
@@ -147,10 +596,9 @@ def run_technical(
         timeout_seconds=300.0,
     )
 
-    print("TECHNICAL RAW RESPONSE:")
-    print(raw)
-
-    md = (_resolve_technical_discord_markdown(raw) or "_No TA output_").rstrip()
+    md = (
+        _resolve_technical_discord_markdown(raw, ctx.session, per) or "_No TA output_"
+    ).rstrip()
     structured = raw.get("structured")
     if not isinstance(structured, dict):
         structured = {"scores": {}, "notes": ""}
