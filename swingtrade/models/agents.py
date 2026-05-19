@@ -7,14 +7,6 @@ from typing import Any, Literal
 
 SessionName = Literal["pre_market", "post_market"]
 
-# Display order for CIO context Discord posts (matches pipeline order).
-CIO_PRIOR_AGENT_ORDER: tuple[str, ...] = (
-    "market_sentiment",
-    "hard_veto",
-    "technical_analysis",
-    "sentiment",
-)
-
 
 @dataclass
 class RunContext:
@@ -61,49 +53,3 @@ class PipelineState:
             f"{json.dumps(self.tickers, ensure_ascii=False)}\n"
             f"Prior structured JSON from agents:\n{self.prior_structured_for_cio()}"
         )
-
-
-def format_cio_context_discord(state: PipelineState, session: SessionName) -> str:
-    """Human-readable mirror of ``cio_user_message`` for Discord (per-agent JSON sections)."""
-    lines = [
-        "# CIO agent input",
-        "",
-        f"**Session:** `{session}`",
-        "",
-        "## Survivors (scoped for TA / Sentiment / CIO)",
-    ]
-    if state.tickers:
-        lines.append(", ".join(f"`{t}`" for t in state.tickers))
-    else:
-        lines.append("_none_")
-    lines.extend(
-        [
-            "",
-            "_Agent `discord_markdown` is **not** included — full `structured` JSON only._",
-            "",
-        ]
-    )
-
-    seen: set[str] = set()
-    for agent_id in CIO_PRIOR_AGENT_ORDER:
-        seen.add(agent_id)
-        lines.extend(_cio_context_agent_section(agent_id, state.prior_structured.get(agent_id)))
-
-    for agent_id in sorted(k for k in state.prior_structured if k not in seen):
-        lines.extend(_cio_context_agent_section(agent_id, state.prior_structured[agent_id]))
-
-    return "\n".join(lines).strip()
-
-
-def _cio_context_agent_section(
-    agent_id: str, blob: dict[str, Any] | None
-) -> list[str]:
-    out = [f"## {agent_id}", ""]
-    if blob is None:
-        out.append("_not run / no structured output_")
-    else:
-        out.append("```json")
-        out.append(json.dumps(blob, indent=2, ensure_ascii=False, default=str))
-        out.append("```")
-    out.append("")
-    return out

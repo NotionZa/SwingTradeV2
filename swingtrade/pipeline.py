@@ -16,7 +16,6 @@ from swingtrade.models.agents import (
     PipelineState,
     RunContext,
     SessionName,
-    format_cio_context_discord,
 )
 from swingtrade.settings import Settings, get_settings
 from swingtrade.universe_loader import load_universe_yaml, merge_watchlist_into_universe
@@ -89,23 +88,6 @@ def _post_cio_risk_discord(
         http,
         settings.discord_webhook_risk_management,
         build_cio_risk_markdown(cio, session),
-        dry_run=dry_run,
-    )
-
-
-def _post_cio_context_discord(
-    http: Any,
-    settings: Settings,
-    state: PipelineState,
-    session: SessionName,
-    *,
-    dry_run: bool,
-) -> None:
-    """Post full structured CIO input (readable) — same data as ``cio_user_message``."""
-    post_discord_webhook(
-        http,
-        settings.discord_webhook_cio_context,
-        format_cio_context_discord(state, session),
         dry_run=dry_run,
     )
 
@@ -235,7 +217,6 @@ def run_single_agent(
         else:
             se = _stub("sentiment", "ANTHROPIC_API_KEY missing")
         state.add(se.agent_id, se)
-        _post_cio_context_discord(http, settings, state, session, dry_run=dry_run)
         if client:
             cio = run_cio(settings, ctx, state, client)
         else:
@@ -333,7 +314,6 @@ def run_pipeline(
         )
 
         # 5) CIO
-        _post_cio_context_discord(http, settings, state, session, dry_run=dry_run)
         if client:
             cio = run_cio(settings, ctx, state, client)
         else:
