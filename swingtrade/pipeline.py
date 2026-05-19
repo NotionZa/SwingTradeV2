@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any, Literal
 
 from anthropic import Anthropic
 
-from swingtrade.agents.cio import run_cio
+from swingtrade.agents.cio import build_cio_risk_markdown, run_cio
 from swingtrade.agents.hard_veto import run_hard_veto
 from swingtrade.agents.market_sentiment import run_market_sentiment
 from swingtrade.agents.sentiment import run_sentiment
@@ -75,6 +74,23 @@ def format_news_digest(sentiment_structured: dict[str, Any]) -> str:
             src = item.get("source") or ""
             lines.append(f"- {title} _({src})_")
     return "\n".join(lines)
+
+
+def _post_cio_risk_discord(
+    http: Any,
+    settings: Settings,
+    cio: AgentResult,
+    session: SessionName,
+    *,
+    dry_run: bool,
+) -> None:
+    """Risk-management webhook: compact summary only (no full brief, no raw JSON)."""
+    post_discord_webhook(
+        http,
+        settings.discord_webhook_risk_management,
+        build_cio_risk_markdown(cio, session),
+        dry_run=dry_run,
+    )
 
 
 def _post_cio_context_discord(
@@ -231,19 +247,7 @@ def run_single_agent(
             dry_run=dry_run,
         )
         if session == "pre_market":
-            risk_body = (
-                "## Risk management\n"
-                + cio.discord_markdown
-                + "\n\n```json\n"
-                + json.dumps(cio.structured, indent=2)
-                + "\n```"
-            )
-            post_discord_webhook(
-                http,
-                settings.discord_webhook_risk_management,
-                risk_body,
-                dry_run=dry_run,
-            )
+            _post_cio_risk_discord(http, settings, cio, session, dry_run=dry_run)
     finally:
         http.close()
 
@@ -342,18 +346,6 @@ def run_pipeline(
             dry_run=dry_run,
         )
         if session == "pre_market":
-            risk_body = (
-                "## Risk management\n"
-                + cio.discord_markdown
-                + "\n\n```json\n"
-                + json.dumps(cio.structured, indent=2)
-                + "\n```"
-            )
-            post_discord_webhook(
-                http,
-                settings.discord_webhook_risk_management,
-                risk_body,
-                dry_run=dry_run,
-            )
+            _post_cio_risk_discord(http, settings, cio, session, dry_run=dry_run)
     finally:
         http.close()
