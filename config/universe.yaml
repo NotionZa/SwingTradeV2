@@ -1,8 +1,6 @@
-# QQQ + XLK style universe — expand quarterly per playbook.
+# Phase G1 — curated MVP validation universe (~20 liquid tech/momentum names).
 # Format: mapping with `tickers` list (preferred) or a bare YAML list.
 tickers:
-  - QQQ
-  - XLK
   - NVDA
   - MSFT
   - META
@@ -10,39 +8,16 @@ tickers:
   - AAPL
   - AMD
   - AVGO
-  - SMCI
   - ARM
+  - SMCI
   - TSLA
   - PLTR
   - GOOGL
   - NFLX
   - CRM
-  - ORCL
-  - INTC
-  - MU
-  - QCOM
-  - PANW
   - NOW
-  - SNOW
   - CRWD
+  - PANW
+  - SNOW
   - DDOG
   - MDB
-  - SHOP
-  - COIN
-  - HOOD
-  - SOFI
-  - ADBE
-  - CSCO
-  - IBM
-  - ACN
-  - INTU
-  - AMAT
-  - LRCX
-  - KLAC
-  - SNPS
-  - CDNS
-  - MRVL
-  - ON
-  - SWKS
-  - MPWR
-  - TXN
