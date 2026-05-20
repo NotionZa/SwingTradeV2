@@ -6,6 +6,7 @@ from typing import Any, Literal
 from anthropic import Anthropic
 
 from swingtrade.agents.cio import build_cio_risk_markdown, run_cio
+from swingtrade.candidate_logger import log_cio_candidates
 from swingtrade.agents.hard_veto import run_hard_veto
 from swingtrade.agents.market_sentiment import run_market_sentiment
 from swingtrade.agents.sentiment import run_sentiment
@@ -367,5 +368,6 @@ def run_pipeline(
         )
         if session == "pre_market":
             _post_cio_risk_discord(http, settings, cio, session, dry_run=dry_run)
+        log_cio_candidates(state, session, dry_run=dry_run)
     finally:
         http.close()
