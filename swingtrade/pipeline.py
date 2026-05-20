@@ -103,6 +103,39 @@ def _survivors_after_veto(hv: AgentResult, trade: list[str]) -> list[str]:
     return [t for t in trade if t not in killed]
 
 
+def _cap_downstream_survivors(
+    survivors: list[str], cap: int
+) -> tuple[list[str], list[str]]:
+    """Split survivors into downstream pass list and cap-excluded list (stable order)."""
+    if cap <= 0 or len(survivors) <= cap:
+        return list(survivors), []
+    return survivors[:cap], survivors[cap:]
+
+
+def _downstream_cap_discord_note(survivor_count: int, downstream_count: int) -> str:
+    skipped = survivor_count - downstream_count
+    return (
+        f"\n\n_Downstream cap applied: {downstream_count} of {survivor_count} survivors "
+        f"sent to TA / Sentiment / CIO. {skipped} skipped for this detailed run._"
+    )
+
+
+def _apply_downstream_cap(
+    survivors: list[str],
+    max_downstream_tickers: int,
+) -> tuple[list[str], list[str], str | None]:
+    """Return (downstream_tickers, excluded_by_cap, optional Discord note)."""
+    downstream, excluded = _cap_downstream_survivors(survivors, max_downstream_tickers)
+    if len(excluded) == 0:
+        return downstream, excluded, None
+    logger.info(
+        "Downstream cap applied: %s survivors -> %s passed to TA/Sentiment/CIO",
+        len(survivors),
+        len(downstream),
+    )
+    return downstream, excluded, _downstream_cap_discord_note(len(survivors), len(downstream))
+
+
 SingleAgentName = Literal[
     "market_sentiment",
     "hard_veto",
@@ -118,6 +151,7 @@ def run_single_agent(
     session: SessionName,
     dry_run: bool = False,
     max_tickers: int = 30,
+    max_downstream_tickers: int = 10,
     settings: Settings | None = None,
 ) -> None:
     """Run one pipeline agent and POST only that agent's usual Discord payload(s).
@@ -165,10 +199,11 @@ def run_single_agent(
 
         hv = run_hard_veto(settings, trade, wl)
         survivors = _survivors_after_veto(hv, trade)
+        downstream, _, cap_note = _apply_downstream_cap(survivors, max_downstream_tickers)
 
         if agent == "technical_analysis":
             if client:
-                ta = run_technical(settings, ctx, client, survivors)
+                ta = run_technical(settings, ctx, client, downstream)
             else:
                 ta = _stub("technical_analysis", "ANTHROPIC_API_KEY missing")
             post_discord_webhook(
@@ -181,7 +216,7 @@ def run_single_agent(
 
         if agent == "sentiment":
             if client:
-                se = run_sentiment(settings, ctx, client, survivors)
+                se = run_sentiment(settings, ctx, client, downstream)
             else:
                 se = _stub("sentiment", "ANTHROPIC_API_KEY missing")
             post_discord_webhook(
@@ -206,14 +241,14 @@ def run_single_agent(
             ms = _stub("market_sentiment", "ANTHROPIC_API_KEY missing")
         state.add(ms.agent_id, ms)
         state.add(hv.agent_id, hv)
-        state.tickers = survivors
+        state.tickers = downstream
         if client:
-            ta = run_technical(settings, ctx, client, survivors)
+            ta = run_technical(settings, ctx, client, downstream)
         else:
             ta = _stub("technical_analysis", "ANTHROPIC_API_KEY missing")
         state.add(ta.agent_id, ta)
         if client:
-            se = run_sentiment(settings, ctx, client, survivors)
+            se = run_sentiment(settings, ctx, client, downstream)
         else:
             se = _stub("sentiment", "ANTHROPIC_API_KEY missing")
         state.add(se.agent_id, se)
@@ -238,6 +273,7 @@ def run_pipeline(
     session: SessionName,
     dry_run: bool = False,
     max_tickers: int = 30,
+    max_downstream_tickers: int = 10,
     settings: Settings | None = None,
 ) -> None:
     settings = settings or get_settings()
@@ -273,17 +309,21 @@ def run_pipeline(
         hv = run_hard_veto(settings, trade, wl)
         state.add(hv.agent_id, hv)
         survivors = _survivors_after_veto(hv, trade)
-        state.tickers = survivors
+        downstream, _, cap_note = _apply_downstream_cap(survivors, max_downstream_tickers)
+        state.tickers = downstream
+        hv_discord = hv.discord_markdown.rstrip()
+        if cap_note:
+            hv_discord += cap_note
         post_discord_webhook(
             http,
             settings.discord_webhook_earnings_flow,
-            hv.discord_markdown,
+            hv_discord,
             dry_run=dry_run,
         )
 
         # 3) Technical
         if client:
-            ta = run_technical(settings, ctx, client, survivors)
+            ta = run_technical(settings, ctx, client, downstream)
         else:
             ta = _stub("technical_analysis", "ANTHROPIC_API_KEY missing")
         state.add(ta.agent_id, ta)
@@ -296,7 +336,7 @@ def run_pipeline(
 
         # 4) Sentiment
         if client:
-            se = run_sentiment(settings, ctx, client, survivors)
+            se = run_sentiment(settings, ctx, client, downstream)
         else:
             se = _stub("sentiment", "ANTHROPIC_API_KEY missing")
         state.add(se.agent_id, se)

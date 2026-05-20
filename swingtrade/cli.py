@@ -57,6 +57,12 @@ def main(argv: list[str] | None = None) -> int:
         default=30,
         help="Cap trade-candidate tickers per run (excludes Context-only proxies)",
     )
+    p_run.add_argument(
+        "--max-downstream-tickers",
+        type=int,
+        default=10,
+        help="Cap post-veto survivors passed to Technical/Sentiment/CIO",
+    )
 
     p_agent = sub.add_parser(
         "run-agent",
@@ -85,6 +91,12 @@ def main(argv: list[str] | None = None) -> int:
         default=30,
         help="Cap trade-candidate tickers (same as full pipeline)",
     )
+    p_agent.add_argument(
+        "--max-downstream-tickers",
+        type=int,
+        default=10,
+        help="Cap post-veto survivors passed to Technical/Sentiment/CIO",
+    )
 
     sub.add_parser("bot", help="Run Discord watchlist slash-command bot")
 
@@ -96,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
             session=args.session,  # type: ignore[arg-type]
             dry_run=args.dry_run,
             max_tickers=args.max_tickers,
+            max_downstream_tickers=args.max_downstream_tickers,
         )
         return 0
     if args.command == "run-agent":
@@ -105,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
             session=args.session,  # type: ignore[arg-type]
             dry_run=args.dry_run,
             max_tickers=args.max_tickers,
+            max_downstream_tickers=args.max_downstream_tickers,
         )
         return 0
     if args.command == "bot":
