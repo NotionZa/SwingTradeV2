@@ -230,6 +230,8 @@ Use the Market Regime Agent output to determine whether long tech setups are all
 
 - Normal paper sizing guidance can be used.
 
+- Never describe setups or bias as "mean reversion" — use Pullback or controlled pullback/retest language only.
+
 ### Constructive / Cautious
 
 - BUY decisions are allowed only for strong setups.
@@ -247,6 +249,8 @@ Use the Market Regime Agent output to determine whether long tech setups are all
 - Most names should be WATCH or PASS.
 
 - If volume is weak, downgrade aggressively.
+
+- Favour Pullback and pullback/retest entries only; avoid chasing momentum or breakout chase entries.
 
 ### Risk-Off / Bearish
 

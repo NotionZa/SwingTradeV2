@@ -15,7 +15,7 @@ Supported MVP strategies:
 - Pullback
 - No Clean Setup
 
-Do not classify mean reversion, gap-and-go, sector rotation, short trades, or IPO setups during MVP.
+Do not use "mean reversion" as a strategy label. Do not classify gap-and-go, sector rotation, short trades, or IPO setups during MVP. Use only Momentum, Breakout, Pullback, or No Clean Setup.
 
 ## Inputs
 

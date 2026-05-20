@@ -11,13 +11,13 @@
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `regime` | string | One of: `bull_trending`, `bear_trending`, `choppy`, `risk_on`, `risk_off`, `high_volatility`, `mean_reversion` |
+| `regime` | string | One of: `bull_trending`, `bear_trending`, `choppy`, `risk_on`, `risk_off`, `high_volatility`, `range_bound` (range-bound tape — describe as pullback/retest in prose; do not use "mean reversion") |
 | `regime_explanation` | string | Plain English explanation of why this regime was chosen and what data led to it |
 | `confidence_0_10` | int | 0–10 confidence in regime call. 10 = all signals aligned, 0 = completely unclear |
 | `macro_catalysts` | array of objects | List of active or upcoming macro events detected from news headlines - see format below |
 | `macro_summary` | string | One paragraph on macro backdrop in plain English - no jargon without explanation |
 | `sector_strength_notes` | string | Tech / semis / leaders vs laggards with explanation of what it means for trades |
-| `trading_bias` | string | Which strategies are favoured and why |
+| `trading_bias` | string | Which strategies are favoured and why. Use MVP labels only: Momentum, Breakout, Pullback. Do not use "mean reversion" |
 | `key_levels` | string | Important QQQ levels or ranges worth watching with explanation of why they matter |
 | `opex_note` | string | OPEX date and days until it. If within 3 days explain the volatility risk in plain English. If more than 3 days away just note the date. |
 | `reasoning` | object | **Required.** Analytical reasoning behind the regime call — see format below. Do not omit. |
@@ -60,7 +60,7 @@ Each catalyst must be an object with:
     ],
     "macro_summary": "The overall market backdrop is constructive for tech swing trades. QQQ is holding key support and VIX is calm at 16. A Fed speaker this afternoon adds some uncertainty. OPEX in 2 days may cause choppier price action. Best approach is to be selective and have stops ready.",
     "sector_strength_notes": "Semiconductors are leading the market via SOXX outperformance. This is a positive signal because semis are the highest-beta part of tech - when institutions are buying semis it means they have high conviction in the tech rally. Mega-cap tech holding steady. Small and mid-cap tech lagging which is normal in an early-stage rally.",
-    "trading_bias": "Momentum and breakout strategies favoured. Full position sizing appropriate for high conviction setups. Avoid mean reversion trades today as the trend is your friend. Reduce size or step aside if Fed speaker sounds hawkish.",
+    "trading_bias": "Momentum and breakout strategies favoured. Full position sizing appropriate for high conviction setups. Avoid chasing extended momentum — prefer fresh breakouts or controlled pullbacks with clear invalidation. Reduce size or step aside if Fed speaker sounds hawkish.",
     "key_levels": "QQQ support at 480 - this is where buyers have stepped in multiple times recently, a break below here would be a warning sign. Resistance at 492 - the recent high where sellers appeared. A clean break above 492 with volume opens a run toward 500.",
     "opex_note": "Next OPEX is June 20th — 2 days away. Options expiry often causes choppy price action as traders close or roll positions.",
     "reasoning": {
