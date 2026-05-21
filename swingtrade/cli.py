@@ -4,6 +4,9 @@ import argparse
 import logging
 import sys
 
+from pathlib import Path
+
+from swingtrade.candidate_review import export_candidate_review_csv
 from swingtrade.discord_bot import run_bot
 from swingtrade.logging_config import configure_logging
 from swingtrade.pipeline import SingleAgentName, run_pipeline, run_single_agent
@@ -100,6 +103,23 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("bot", help="Run Discord watchlist slash-command bot")
 
+    p_review = sub.add_parser(
+        "review-candidates",
+        help="Export a candidate JSONL file to a CSV review summary under data/reviews/",
+    )
+    p_review.add_argument(
+        "--file",
+        type=Path,
+        required=True,
+        help="Path to candidate JSONL, e.g. data/candidates/2026-05-21_pre_market.jsonl",
+    )
+    p_review.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional CSV output path (default: data/reviews/<stem>_review.csv)",
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "run":
@@ -124,5 +144,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "bot":
         get_settings.cache_clear()  # type: ignore[attr-defined]
         run_bot()
+        return 0
+    if args.command == "review-candidates":
+        try:
+            out = export_candidate_review_csv(args.file, output_path=args.output)
+        except (FileNotFoundError, ValueError) as e:
+            logger.error("%s", e)
+            return 1
+        print(out)
         return 0
     return 2
