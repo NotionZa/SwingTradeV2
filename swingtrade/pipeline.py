@@ -298,13 +298,12 @@ def run_pipeline(
         else:
             ms = _stub("market_sentiment", "ANTHROPIC_API_KEY missing")
         state.add(ms.agent_id, ms)
-        if session == "pre_market":
-            post_discord_webhook(
-                http,
-                settings.discord_webhook_daily_briefing,
-                ms.discord_markdown,
-                dry_run=dry_run,
-            )
+        post_discord_webhook(
+            http,
+            settings.discord_webhook_daily_briefing,
+            ms.discord_markdown,
+            dry_run=dry_run,
+        )
 
         # 2) Hard Veto
         hv = run_hard_veto(settings, trade, wl)
