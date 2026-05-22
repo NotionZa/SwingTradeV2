@@ -164,29 +164,36 @@ Top-level keys:
 - discord_markdown
 - structured
 
-structured must include:
+### Primary deliverable: `structured.tickers` (mandatory)
 
-- tickers
-- scores
-- notes
+**`structured.tickers` is the primary mandatory deliverable.** The CIO Agent and Python Discord formatter depend on it.
 
-structured.tickers must be an object keyed by ticker symbol.
+- `structured.tickers` must be an **object keyed by ticker symbol** (e.g. `"NVDA": { ... }`).
+- **Every ticker in the input** must have exactly one row under `structured.tickers` (including survivors you analyzed).
+- **`structured.scores` without `structured.tickers` is invalid.** Never return scores-only output.
+- `structured.scores` must **mirror** `structured.tickers[*].ta_score` for quick access — it is **not** a substitute for full ticker rows.
 
-Every ticker in the input should appear in structured.tickers if enough data exists.
+Each ticker row must include the schema fields (strategy_match, setup_quality, trend/momentum/RS, levels or nulls, summary, cio_notes, etc.).
 
-If data is insufficient, still include the ticker and mark:
+**No Clean Setup** still requires a full ticker row:
 
-- strategy_match: "No Clean Setup"
-- setup_quality: "No Trade"
-- ta_score: 0–4
-- summary: "Insufficient data for reliable technical assessment."
+- strategy_match: `"No Clean Setup"`
+- setup_quality: `"No Trade"` (or appropriate quality)
+- trend_status, momentum_status, relative_strength_vs_qqq, technical_risks, invalidation_condition, summary, cio_notes
+- suggested_entry_zone, suggested_stop_loss, suggested_target, risk_reward: **null** when no valid trade plan (do not invent levels)
 
-discord_markdown:
+If data is insufficient, still include the row and mark honestly in summary/cio_notes.
 
-- Can be concise.
-- Do not spend excessive tokens on formatting.
-- Python may rebuild the final Discord watchlist from structured.tickers.
-- Do not leave discord_markdown blank unless structured.tickers is complete.
+`structured` must also include:
+
+- `notes` — cross-cutting TA themes
+
+### `discord_markdown` (minimal)
+
+- May be **one short line** (e.g. `"Watchlist built from structured.tickers."`) because **Python formats Discord from `structured.tickers`**.
+- Do **not** spend output tokens on long Discord prose or tables.
+- Do **not** return markdown tables.
+- Do not leave `discord_markdown` completely empty if `structured.tickers` is complete.
 
 Do not output BUY, WATCH, PASS, or BLOCKED.
 
@@ -203,8 +210,9 @@ Do not include raw JSON inside discord_markdown.
 Before returning, verify:
 
 - JSON is valid.
-- structured.tickers is populated.
-- structured.scores matches ticker scores.
-- every score is justified.
-- no final trade decision is made.
-- missing data is marked honestly.
+- **Every input ticker has a row in `structured.tickers`** (object map, not a list).
+- **`structured.scores` is not returned without `structured.tickers`.**
+- `structured.scores` matches each row's `ta_score`.
+- Rows with setups include entry/stop/target/R/R where applicable; No Clean Setup rows use null levels.
+- No final trade decision is made.
+- Missing data is marked honestly.

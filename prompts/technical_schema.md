@@ -2,9 +2,11 @@ Technical Analysis — JSON schema
 
 Limits
 
-- discord_markdown must stay under 18,000 characters.
+- discord_markdown must stay under 18,000 characters (usually one short line; Python builds the watchlist post).
 - Output must be valid JSON.
-- Every ticker in the input payload should appear in structured.tickers if enough data exists.
+- **structured.tickers is required** — an object map keyed by symbol with one full row per input ticker.
+- **structured.scores alone is invalid** — scores must mirror `tickers[*].ta_score` and cannot replace ticker rows.
+- Every ticker in the input payload must appear in structured.tickers.
 - If data is missing or unreliable, include the ticker and mark strategy_match as "No Clean Setup".
 - Do not output BUY, WATCH, PASS, or BLOCKED. That belongs to the CIO Agent.
 
@@ -24,9 +26,9 @@ structured fields
 
 |---|---|---|
 
-| tickers | object | Map of ticker symbol → full technical analysis object. |
+| tickers | object | **Required.** Map of ticker symbol → full technical analysis object. Primary deliverable for CIO and Python Discord formatting. |
 
-| scores | object | Map ticker → numeric TA score 0–10. Kept for backward compatibility and quick CIO access. |
+| scores | object | Map ticker → numeric TA score 0–10. Must mirror `tickers[sym].ta_score`. **Not a substitute for ticker rows.** |
 
 | notes | string | Cross-cutting TA themes, breadth, risk, sector behaviour, or common setup quality. |
 
@@ -149,7 +151,7 @@ Minimal valid example
 
 {
 
-  "discord_markdown": "| Ticker | Mkt Cap | Setup | TA Score | Trend | Momentum | RS vs QQQ | Key Levels | Risk |\n|---|---:|---|---:|---|---|---|---|---|\n| NVDA | $3.1T | Momentum | 8.4 | Bullish | Strong | Outperforming | S: $124.50 / R: $135.00 | Slightly extended |",
+  "discord_markdown": "Watchlist built from structured.tickers (Python formatter).",
 
   "structured": {
 

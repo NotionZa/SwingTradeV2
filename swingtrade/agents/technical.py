@@ -86,6 +86,44 @@ def _row_str(row: dict[str, Any], key: str) -> str | None:
     return s if s else None
 
 
+def _row_symbol(row: dict[str, Any]) -> str | None:
+    for key in ("ticker", "symbol", "sym"):
+        sym = _row_str(row, key)
+        if sym:
+            return sym.upper()
+    return None
+
+
+def _coerce_structured_tickers(structured: dict[str, Any]) -> dict[str, Any]:
+    """Normalize structured.tickers to a symbol-keyed dict; warn on scores-only payloads."""
+    tickers_in = structured.get("tickers")
+    tickers: dict[str, Any] = {}
+
+    if isinstance(tickers_in, dict):
+        for sym, row in tickers_in.items():
+            key = str(sym).strip().upper()
+            if not key:
+                continue
+            tickers[key] = row if isinstance(row, dict) else row
+    elif isinstance(tickers_in, list):
+        for item in tickers_in:
+            if not isinstance(item, dict):
+                continue
+            sym = _row_symbol(item)
+            if sym:
+                tickers[sym] = item
+
+    scores = structured.get("scores")
+    has_scores = isinstance(scores, dict) and bool(scores)
+    if has_scores and not tickers:
+        logger.warning(
+            "Technical returned scores without ticker rows (%s score keys, 0 tickers)",
+            len(scores),
+        )
+
+    return {**structured, "tickers": tickers}
+
+
 def _level_field_missing(value: Any) -> bool:
     if value is None:
         return True
@@ -777,13 +815,14 @@ def run_technical(
         model=settings.anthropic_model_sonnet,
         system=load_system_prompt("technical"),
         user=user,
-        max_tokens=8192,
+        max_tokens=12288,
         timeout_seconds=300.0,
     )
 
     structured = raw.get("structured")
     if not isinstance(structured, dict):
         structured = {"scores": {}, "notes": ""}
+    structured = _coerce_structured_tickers(structured)
     structured = _apply_ta_score_caps(structured, ctx.session)
     raw = {**raw, "structured": structured}
 
