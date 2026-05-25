@@ -9,7 +9,11 @@ from pathlib import Path
 from swingtrade.candidate_review import export_candidate_review_csv
 from swingtrade.discord_bot import run_bot
 from swingtrade.logging_config import configure_logging
-from swingtrade.pipeline import SingleAgentName, run_pipeline, run_single_agent
+from swingtrade.pipeline import (
+    SingleAgentName,
+    run_pipeline,
+    run_single_agent,
+)
 from swingtrade.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -61,10 +65,22 @@ def main(argv: list[str] | None = None) -> int:
         help="Cap trade-candidate tickers per run (excludes Context-only proxies)",
     )
     p_run.add_argument(
+        "--max-analysis-tickers",
+        type=int,
+        default=None,
+        help="Post-veto survivors sent to Technical/Sentiment (default 30)",
+    )
+    p_run.add_argument(
+        "--max-cio-tickers",
+        type=int,
+        default=None,
+        help="Top-ranked symbols sent to CIO after TA/Sentiment (default 12)",
+    )
+    p_run.add_argument(
         "--max-downstream-tickers",
         type=int,
-        default=10,
-        help="Cap post-veto survivors passed to Technical/Sentiment/CIO",
+        default=None,
+        help="Legacy: sets both analysis and CIO caps when the new flags are omitted",
     )
 
     p_agent = sub.add_parser(
@@ -95,10 +111,22 @@ def main(argv: list[str] | None = None) -> int:
         help="Cap trade-candidate tickers (same as full pipeline)",
     )
     p_agent.add_argument(
+        "--max-analysis-tickers",
+        type=int,
+        default=None,
+        help="Post-veto survivors sent to Technical/Sentiment (default 30)",
+    )
+    p_agent.add_argument(
+        "--max-cio-tickers",
+        type=int,
+        default=None,
+        help="Top-ranked symbols sent to CIO (default 12)",
+    )
+    p_agent.add_argument(
         "--max-downstream-tickers",
         type=int,
-        default=10,
-        help="Cap post-veto survivors passed to Technical/Sentiment/CIO",
+        default=None,
+        help="Legacy: sets both analysis and CIO caps when the new flags are omitted",
     )
 
     sub.add_parser("bot", help="Run Discord watchlist slash-command bot")
@@ -128,6 +156,8 @@ def main(argv: list[str] | None = None) -> int:
             session=args.session,  # type: ignore[arg-type]
             dry_run=args.dry_run,
             max_tickers=args.max_tickers,
+            max_analysis_tickers=args.max_analysis_tickers,
+            max_cio_tickers=args.max_cio_tickers,
             max_downstream_tickers=args.max_downstream_tickers,
         )
         return 0
@@ -138,6 +168,8 @@ def main(argv: list[str] | None = None) -> int:
             session=args.session,  # type: ignore[arg-type]
             dry_run=args.dry_run,
             max_tickers=args.max_tickers,
+            max_analysis_tickers=args.max_analysis_tickers,
+            max_cio_tickers=args.max_cio_tickers,
             max_downstream_tickers=args.max_downstream_tickers,
         )
         return 0

@@ -83,7 +83,7 @@ def run_cio(
     state: PipelineState,
     client: Anthropic,
 ) -> AgentResult:
-    user = state.cio_user_message(ctx.session)
+    user = state.cio_user_message(ctx.session, cio_symbols=state.tickers)
     logger.debug(
         "CIO user payload: %s agent structured blobs, %s chars",
         len(state.prior_structured),

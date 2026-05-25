@@ -7,6 +7,7 @@ from anthropic import Anthropic
 
 from swingtrade.agents.cio import build_cio_risk_markdown, run_cio
 from swingtrade.candidate_logger import log_cio_candidates
+from swingtrade.candidate_ranker import rank_for_cio
 from swingtrade.agents.hard_veto import run_hard_veto
 from swingtrade.agents.market_sentiment import run_market_sentiment
 from swingtrade.agents.sentiment import run_sentiment
@@ -113,28 +114,38 @@ def _cap_downstream_survivors(
     return survivors[:cap], survivors[cap:]
 
 
-def _downstream_cap_discord_note(survivor_count: int, downstream_count: int) -> str:
-    skipped = survivor_count - downstream_count
+def resolve_tier_caps(
+    *,
+    max_analysis_tickers: int | None = None,
+    max_cio_tickers: int | None = None,
+    max_downstream_tickers: int | None = None,
+) -> tuple[int, int]:
+    """Resolve TA/Sentiment vs CIO pool sizes (legacy --max-downstream-tickers sets both)."""
+    if max_analysis_tickers is not None or max_cio_tickers is not None:
+        analysis = (
+            max_analysis_tickers
+            if max_analysis_tickers is not None
+            else (max_downstream_tickers if max_downstream_tickers is not None else 30)
+        )
+        cio = (
+            max_cio_tickers
+            if max_cio_tickers is not None
+            else (max_downstream_tickers if max_downstream_tickers is not None else 12)
+        )
+        return analysis, cio
+    if max_downstream_tickers is not None:
+        return max_downstream_tickers, max_downstream_tickers
+    return 30, 12
+
+
+def _analysis_cap_discord_note(survivor_count: int, analysis_count: int) -> str | None:
+    if analysis_count >= survivor_count:
+        return None
+    skipped = survivor_count - analysis_count
     return (
-        f"\n\n_Downstream cap applied: {downstream_count} of {survivor_count} survivors "
-        f"sent to TA / Sentiment / CIO. {skipped} skipped for this detailed run._"
+        f"\n\n_Analysis cap: {analysis_count} of {survivor_count} survivors sent to "
+        f"TA/Sentiment. {skipped} skipped for detailed analysis this run._"
     )
-
-
-def _apply_downstream_cap(
-    survivors: list[str],
-    max_downstream_tickers: int,
-) -> tuple[list[str], list[str], str | None]:
-    """Return (downstream_tickers, excluded_by_cap, optional Discord note)."""
-    downstream, excluded = _cap_downstream_survivors(survivors, max_downstream_tickers)
-    if len(excluded) == 0:
-        return downstream, excluded, None
-    logger.info(
-        "Downstream cap applied: %s survivors -> %s passed to TA/Sentiment/CIO",
-        len(survivors),
-        len(downstream),
-    )
-    return downstream, excluded, _downstream_cap_discord_note(len(survivors), len(downstream))
 
 
 SingleAgentName = Literal[
@@ -152,7 +163,9 @@ def run_single_agent(
     session: SessionName,
     dry_run: bool = False,
     max_tickers: int = 30,
-    max_downstream_tickers: int = 10,
+    max_analysis_tickers: int | None = None,
+    max_cio_tickers: int | None = None,
+    max_downstream_tickers: int | None = None,
     settings: Settings | None = None,
 ) -> None:
     """Run one pipeline agent and POST only that agent's usual Discord payload(s).
@@ -200,11 +213,16 @@ def run_single_agent(
 
         hv = run_hard_veto(settings, trade, wl)
         survivors = _survivors_after_veto(hv, trade)
-        downstream, _, cap_note = _apply_downstream_cap(survivors, max_downstream_tickers)
+        analysis_cap, cio_cap = resolve_tier_caps(
+            max_analysis_tickers=max_analysis_tickers,
+            max_cio_tickers=max_cio_tickers,
+            max_downstream_tickers=max_downstream_tickers,
+        )
+        analysis_symbols, _ = _cap_downstream_survivors(survivors, analysis_cap)
 
         if agent == "technical_analysis":
             if client:
-                ta = run_technical(settings, ctx, client, downstream)
+                ta = run_technical(settings, ctx, client, analysis_symbols)
             else:
                 ta = _stub("technical_analysis", "ANTHROPIC_API_KEY missing")
             post_discord_webhook(
@@ -217,7 +235,7 @@ def run_single_agent(
 
         if agent == "sentiment":
             if client:
-                se = run_sentiment(settings, ctx, client, downstream)
+                se = run_sentiment(settings, ctx, client, analysis_symbols)
             else:
                 se = _stub("sentiment", "ANTHROPIC_API_KEY missing")
             post_discord_webhook(
@@ -242,17 +260,27 @@ def run_single_agent(
             ms = _stub("market_sentiment", "ANTHROPIC_API_KEY missing")
         state.add(ms.agent_id, ms)
         state.add(hv.agent_id, hv)
-        state.tickers = downstream
+        state.analysis_tickers = analysis_symbols
         if client:
-            ta = run_technical(settings, ctx, client, downstream)
+            ta = run_technical(settings, ctx, client, analysis_symbols)
         else:
             ta = _stub("technical_analysis", "ANTHROPIC_API_KEY missing")
         state.add(ta.agent_id, ta)
         if client:
-            se = run_sentiment(settings, ctx, client, downstream)
+            se = run_sentiment(settings, ctx, client, analysis_symbols)
         else:
             se = _stub("sentiment", "ANTHROPIC_API_KEY missing")
         state.add(se.agent_id, se)
+        cio_symbols = rank_for_cio(
+            state.prior_structured, analysis_symbols, max_cio=cio_cap
+        )
+        state.tickers = cio_symbols
+        logger.info(
+            "Tier pools: %s survivors, %s analysis (TA/Sentiment), %s CIO review",
+            len(survivors),
+            len(analysis_symbols),
+            len(cio_symbols),
+        )
         if client:
             cio = run_cio(settings, ctx, state, client)
         else:
@@ -274,7 +302,9 @@ def run_pipeline(
     session: SessionName,
     dry_run: bool = False,
     max_tickers: int = 30,
-    max_downstream_tickers: int = 10,
+    max_analysis_tickers: int | None = None,
+    max_cio_tickers: int | None = None,
+    max_downstream_tickers: int | None = None,
     settings: Settings | None = None,
 ) -> None:
     settings = settings or get_settings()
@@ -309,11 +339,23 @@ def run_pipeline(
         hv = run_hard_veto(settings, trade, wl)
         state.add(hv.agent_id, hv)
         survivors = _survivors_after_veto(hv, trade)
-        downstream, _, cap_note = _apply_downstream_cap(survivors, max_downstream_tickers)
-        state.tickers = downstream
+        analysis_cap, cio_cap = resolve_tier_caps(
+            max_analysis_tickers=max_analysis_tickers,
+            max_cio_tickers=max_cio_tickers,
+            max_downstream_tickers=max_downstream_tickers,
+        )
+        analysis_symbols, _ = _cap_downstream_survivors(survivors, analysis_cap)
+        state.analysis_tickers = analysis_symbols
+        cap_note = _analysis_cap_discord_note(len(survivors), len(analysis_symbols))
         hv_discord = hv.discord_markdown.rstrip()
         if cap_note:
             hv_discord += cap_note
+        logger.info(
+            "Analysis pool: %s survivors -> %s for TA/Sentiment (cap=%s)",
+            len(survivors),
+            len(analysis_symbols),
+            analysis_cap,
+        )
         post_discord_webhook(
             http,
             settings.discord_webhook_earnings_flow,
@@ -323,7 +365,7 @@ def run_pipeline(
 
         # 3) Technical
         if client:
-            ta = run_technical(settings, ctx, client, downstream)
+            ta = run_technical(settings, ctx, client, analysis_symbols)
         else:
             ta = _stub("technical_analysis", "ANTHROPIC_API_KEY missing")
         state.add(ta.agent_id, ta)
@@ -336,7 +378,7 @@ def run_pipeline(
 
         # 4) Sentiment
         if client:
-            se = run_sentiment(settings, ctx, client, downstream)
+            se = run_sentiment(settings, ctx, client, analysis_symbols)
         else:
             se = _stub("sentiment", "ANTHROPIC_API_KEY missing")
         state.add(se.agent_id, se)
@@ -351,6 +393,17 @@ def run_pipeline(
             settings.discord_webhook_market_news,
             format_news_digest(se.structured),
             dry_run=dry_run,
+        )
+
+        cio_symbols = rank_for_cio(
+            state.prior_structured, analysis_symbols, max_cio=cio_cap
+        )
+        state.tickers = cio_symbols
+        logger.info(
+            "CIO pool: %s ranked symbols for review (cap=%s, from %s analysed)",
+            len(cio_symbols),
+            cio_cap,
+            len(analysis_symbols),
         )
 
         # 5) CIO
