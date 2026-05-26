@@ -1,23 +1,53 @@
-# Phase G1 — curated MVP validation universe (~20 liquid tech/momentum names).
+# Phase M4 — AI/tech infrastructure trade universe (~41 liquid names).
 # Format: mapping with `tickers` list (preferred) or a bare YAML list.
+# Context proxies live in watchlist.yaml only; they are excluded from Hard Veto trade pool.
 tickers:
+  # Core Tech
   - NVDA
   - MSFT
   - META
   - AMZN
   - AAPL
-  - AMD
-  - AVGO
-  - ARM
-  - SMCI
-  - TSLA
-  - PLTR
   - GOOGL
   - NFLX
+  # Semiconductors
+  - AMD
+  - AVGO
+  - SMCI
+  - ARM
+  - INTC
+  # Hardware / Infrastructure
+  - QCOM
+  - MU
+  - TSM
+  - ASML
+  - AMAT
+  - LRCX
+  - KLAC
+  - MRVL
+  - ANET
+  # Storage / Data Infrastructure
+  - STX
+  - WDC
+  # Software / Cloud
   - CRM
   - NOW
-  - CRWD
-  - PANW
   - SNOW
   - DDOG
   - MDB
+  # Cybersecurity
+  - CRWD
+  - PANW
+  # High Beta / Momentum
+  - TSLA
+  - PLTR
+  - COIN
+  - APP
+  - RDDT
+  # Energy / Power Infrastructure
+  - VST
+  - CEG
+  - NRG
+  - ETN
+  - VRT
+  - GEV

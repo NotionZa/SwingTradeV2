@@ -12,6 +12,20 @@ Semiconductors:
   - AVGO
   - SMCI
   - ARM
+  - INTC
+Hardware / Infrastructure:
+  - QCOM
+  - MU
+  - TSM
+  - ASML
+  - AMAT
+  - LRCX
+  - KLAC
+  - MRVL
+  - ANET
+Storage / Data Infrastructure:
+  - STX
+  - WDC
 Software / Cloud:
   - CRM
   - NOW
@@ -24,10 +38,22 @@ Cybersecurity:
 High Beta / Momentum:
   - TSLA
   - PLTR
+  - COIN
+  - APP
+  - RDDT
+Energy / Power Infrastructure:
+  - VST
+  - CEG
+  - NRG
+  - ETN
+  - VRT
+  - GEV
 Context proxies:
   - QQQ
   - XLK
   - SMH
+  - SOXX
   - VIX
   - DXY
   - TLT
+  - TNX
