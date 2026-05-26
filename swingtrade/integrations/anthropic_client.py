@@ -40,6 +40,13 @@ def complete_json_agent(
         system=system,
         messages=[{"role": "user", "content": user}],
     )
+    stop = getattr(msg, "stop_reason", None)
+    if stop == "max_tokens":
+        logger.warning(
+            "Model %s stopped at max_tokens=%s (output likely truncated)",
+            model,
+            max_tokens,
+        )
     text = _extract_text(msg)
     from swingtrade.json_utils import (
         extract_json_object,
@@ -71,6 +78,7 @@ def complete_json_agent(
         if legacy_md:
             dm = legacy_md
     raw["discord_markdown"] = dm
+    raw["_agent_meta"] = {"stop_reason": stop, "output_chars": len(text)}
     return raw
 
 

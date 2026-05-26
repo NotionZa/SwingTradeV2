@@ -7,11 +7,53 @@ from typing import Any
 from anthropic import Anthropic
 
 from swingtrade.integrations.anthropic_client import complete_json_agent
-from swingtrade.models.agents import AgentResult, RunContext, PipelineState, SessionName
+from swingtrade.models.agents import AgentResult, PipelineState, RunContext, SessionName
 from swingtrade.prompt_loader import load_system_prompt
 from swingtrade.settings import Settings
 
 logger = logging.getLogger(__name__)
+
+_CIO_MAX_TOKENS = 16_384
+_CIO_RETRY_APPEND = (
+    "\n\nRETRY — prior response was truncated or incomplete. Return valid JSON only. "
+    "Rules: (1) Complete structured.decisions with one object per ticker in "
+    "Downstream_analyzed_tickers. (2) Keep every string field concise (1–2 sentences max). "
+    "(3) Keep discord_markdown under 3,500 characters — short bullets only; details live in structured."
+)
+
+
+def _pop_agent_meta(raw: dict[str, Any]) -> dict[str, Any]:
+    meta = raw.pop("_agent_meta", None)
+    return meta if isinstance(meta, dict) else {}
+
+
+def _coerce_decisions(structured: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = structured.get("decisions")
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        ticker = item.get("ticker")
+        if isinstance(ticker, str) and ticker.strip():
+            out.append(item)
+    return out
+
+
+def _needs_cio_retry(
+    meta: dict[str, Any],
+    structured: dict[str, Any],
+    expected_tickers: list[str],
+) -> bool:
+    if structured.get("parse_error"):
+        return True
+    if meta.get("stop_reason") == "max_tokens":
+        return True
+    decisions = _coerce_decisions(structured)
+    if expected_tickers and len(decisions) < len(expected_tickers):
+        return True
+    return False
 
 
 def _summary_int(summary: dict[str, Any], key: str) -> int:
@@ -36,7 +78,7 @@ def _summary_str(summary: dict[str, Any], key: str, default: str = "Unknown") ->
 
 
 def build_cio_risk_markdown(result: AgentResult, session: str | SessionName) -> str:
-    """Compact risk-management Discord post from CIO structured output (never raw JSON)."""
+    """Risk-management Discord post from CIO structured.summary (counts + regime only)."""
     structured = result.structured if isinstance(result.structured, dict) else {}
     summary = structured.get("summary")
     if not isinstance(summary, dict):
@@ -84,25 +126,63 @@ def run_cio(
     client: Anthropic,
 ) -> AgentResult:
     user = state.cio_user_message(ctx.session)
-    logger.debug(
-        "CIO user payload: %s agent structured blobs, %s chars",
+    full_len = len(
+        json.dumps(state.prior_structured, ensure_ascii=False, default=str)
+    )
+    logger.info(
+        "CIO user payload: %s agents, %s chars to model (%s chars raw prior_structured)",
         len(state.prior_structured),
         len(user),
+        full_len,
     )
+    system = load_system_prompt("cio")
     raw = complete_json_agent(
         client,
         model=settings.anthropic_model_opus,
-        system=load_system_prompt("cio"),
+        system=system,
         user=user,
-        max_tokens=8192,
+        max_tokens=_CIO_MAX_TOKENS,
+        timeout_seconds=300.0,
     )
-    md = str(raw.get("discord_markdown", "")).strip() or "_No CIO output_"
+    meta = _pop_agent_meta(raw)
     structured = raw.get("structured")
     if not isinstance(structured, dict):
         structured = {}
-    logger.debug(
-        "CIO structured output (internal): %s",
-        json.dumps(structured, indent=2, ensure_ascii=False, default=str),
+
+    if _needs_cio_retry(meta, structured, state.tickers):
+        logger.warning(
+            "CIO retry: stop_reason=%s decisions=%s expected_tickers=%s",
+            meta.get("stop_reason"),
+            len(_coerce_decisions(structured)),
+            len(state.tickers),
+        )
+        raw = complete_json_agent(
+            client,
+            model=settings.anthropic_model_opus,
+            system=system,
+            user=user + _CIO_RETRY_APPEND,
+            max_tokens=_CIO_MAX_TOKENS,
+            timeout_seconds=300.0,
+        )
+        meta = _pop_agent_meta(raw)
+        structured = raw.get("structured")
+        if not isinstance(structured, dict):
+            structured = {}
+
+    if structured.get("parse_error"):
+        logger.warning(
+            "CIO JSON parse issue: %s",
+            structured.get("parse_error"),
+        )
+
+    # Model-only: post exactly what Opus returns in discord_markdown (no Python rewrite).
+    md = str(raw.get("discord_markdown", "")).strip() or "_No CIO output_"
+    n_dec = len(_coerce_decisions(structured))
+    logger.info(
+        "CIO result: discord_markdown=%s chars, decisions=%s, stop_reason=%s",
+        len(md),
+        n_dec,
+        meta.get("stop_reason"),
     )
     return AgentResult(
         agent_id="cio",

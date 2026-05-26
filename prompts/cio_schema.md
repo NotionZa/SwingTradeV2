@@ -4,7 +4,11 @@
 
 - Output must be valid JSON.
 
-- `discord_markdown` must stay under 18,000 characters.
+- **Complete `structured.decisions` for every ticker in `Downstream_analyzed_tickers` before writing long prose.** Truncated JSON fails the pipeline.
+
+- Keep per-decision string fields concise (1–2 sentences). Put depth in structured, not repetition in `discord_markdown`.
+
+- `discord_markdown` must stay under **3,500 characters** (short bullets; BUY / WATCH / PASS groupings only).
 
 - Do not use markdown tables in `discord_markdown`.
 

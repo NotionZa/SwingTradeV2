@@ -7,6 +7,25 @@ from typing import Any, Literal
 
 SessionName = Literal["pre_market", "post_market"]
 
+# Blobs duplicated elsewhere or too large for CIO — stripped in prior_structured_for_cio().
+_CIO_STRIP_TOP_LEVEL: dict[str, tuple[str, ...]] = {
+    "market_sentiment": ("macro_bundle", "market_news_headlines"),
+    "technical_analysis": ("inputs",),
+    "sentiment": ("raw_bundle",),
+}
+
+
+def slim_structured_for_cio(prior: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Drop raw market/TA/news payloads; keep decision fields CIO needs."""
+    out: dict[str, dict[str, Any]] = {}
+    for agent_id, blob in prior.items():
+        if not isinstance(blob, dict):
+            continue
+        strip_keys = _CIO_STRIP_TOP_LEVEL.get(agent_id, ())
+        slim = {k: v for k, v in blob.items() if k not in strip_keys}
+        out[agent_id] = slim
+    return out
+
 
 @dataclass
 class RunContext:
@@ -37,13 +56,9 @@ class PipelineState:
         self.prior_structured[agent_id] = deepcopy(result.structured)
 
     def prior_structured_for_cio(self) -> str:
-        """Full structured payloads from all prior agents as JSON (no trimming)."""
-        return json.dumps(
-            self.prior_structured,
-            indent=2,
-            ensure_ascii=False,
-            default=str,
-        )
+        """Structured payloads for CIO (raw TA inputs and news bundles removed)."""
+        slim = slim_structured_for_cio(self.prior_structured)
+        return json.dumps(slim, indent=2, ensure_ascii=False, default=str)
 
     def cio_user_message(self, session: SessionName) -> str:
         """Exact user payload sent to the CIO model (structured only, no discord_markdown)."""
