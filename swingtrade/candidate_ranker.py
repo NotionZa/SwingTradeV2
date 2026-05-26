@@ -129,16 +129,11 @@ def _rank_score(
     )
 
 
-def rank_for_cio(
+def rank_analysis_pool(
     prior_structured: dict[str, dict[str, Any]],
     analysis_symbols: list[str],
-    *,
-    max_cio: int = 12,
-) -> list[str]:
-    """Return top *max_cio* symbols for CIO review (highest rank_score first)."""
-    if max_cio <= 0 or not analysis_symbols:
-        return []
-
+) -> list[tuple[str, float]]:
+    """Rank all *analysis_symbols* by rank_score (highest first)."""
     ta = prior_structured.get("technical_analysis")
     if not isinstance(ta, dict):
         ta = {}
@@ -155,6 +150,20 @@ def rank_for_cio(
         ranked.append((key, score))
 
     ranked.sort(key=lambda x: (-x[1], x[0]))
+    return ranked
+
+
+def rank_for_cio(
+    prior_structured: dict[str, dict[str, Any]],
+    analysis_symbols: list[str],
+    *,
+    max_cio: int = 12,
+) -> list[str]:
+    """Return top *max_cio* symbols for CIO review (highest rank_score first)."""
+    if max_cio <= 0 or not analysis_symbols:
+        return []
+
+    ranked = rank_analysis_pool(prior_structured, analysis_symbols)
 
     positive = [s for s, sc in ranked if sc > 0]
     pool = positive if positive else [s for s, _ in ranked]
