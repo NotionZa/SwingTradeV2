@@ -786,6 +786,17 @@ def _discord_market_cap_snapshot(per: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def discord_markdown_from_structured(
+    structured: dict[str, Any],
+    session: str | None = None,
+    per: dict[str, Any] | None = None,
+) -> str:
+    """Build Technical Discord markdown from merged structured output (Python formatter first)."""
+    inputs = per if per is not None else structured.get("inputs")
+    raw: dict[str, Any] = {"structured": structured}
+    return _resolve_technical_discord_markdown(raw, session, inputs if isinstance(inputs, dict) else None)
+
+
 def run_technical(
     settings: Settings,
     ctx: RunContext,

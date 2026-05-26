@@ -10,8 +10,11 @@ from swingtrade.candidate_logger import log_pipeline_candidates
 from swingtrade.candidate_ranker import rank_for_cio
 from swingtrade.agents.hard_veto import run_hard_veto
 from swingtrade.agents.market_sentiment import run_market_sentiment
-from swingtrade.agents.sentiment import run_sentiment
-from swingtrade.agents.technical import run_technical
+from swingtrade.analysis_batching import (
+    DEFAULT_ANALYSIS_BATCH_SIZE,
+    run_sentiment_batched,
+    run_technical_batched,
+)
 from swingtrade.integrations.http import post_discord_webhook, webhook_client
 from swingtrade.models.agents import (
     AgentResult,
@@ -166,6 +169,7 @@ def run_single_agent(
     max_analysis_tickers: int | None = None,
     max_cio_tickers: int | None = None,
     max_downstream_tickers: int | None = None,
+    analysis_batch_size: int = DEFAULT_ANALYSIS_BATCH_SIZE,
     settings: Settings | None = None,
 ) -> None:
     """Run one pipeline agent and POST only that agent's usual Discord payload(s).
@@ -222,7 +226,13 @@ def run_single_agent(
 
         if agent == "technical_analysis":
             if client:
-                ta = run_technical(settings, ctx, client, analysis_symbols)
+                ta = run_technical_batched(
+                    settings,
+                    ctx,
+                    client,
+                    analysis_symbols,
+                    batch_size=analysis_batch_size,
+                )
             else:
                 ta = _stub("technical_analysis", "ANTHROPIC_API_KEY missing")
             post_discord_webhook(
@@ -235,7 +245,13 @@ def run_single_agent(
 
         if agent == "sentiment":
             if client:
-                se = run_sentiment(settings, ctx, client, analysis_symbols)
+                se = run_sentiment_batched(
+                    settings,
+                    ctx,
+                    client,
+                    analysis_symbols,
+                    batch_size=analysis_batch_size,
+                )
             else:
                 se = _stub("sentiment", "ANTHROPIC_API_KEY missing")
             post_discord_webhook(
@@ -262,12 +278,24 @@ def run_single_agent(
         state.add(hv.agent_id, hv)
         state.analysis_tickers = analysis_symbols
         if client:
-            ta = run_technical(settings, ctx, client, analysis_symbols)
+            ta = run_technical_batched(
+                settings,
+                ctx,
+                client,
+                analysis_symbols,
+                batch_size=analysis_batch_size,
+            )
         else:
             ta = _stub("technical_analysis", "ANTHROPIC_API_KEY missing")
         state.add(ta.agent_id, ta)
         if client:
-            se = run_sentiment(settings, ctx, client, analysis_symbols)
+            se = run_sentiment_batched(
+                settings,
+                ctx,
+                client,
+                analysis_symbols,
+                batch_size=analysis_batch_size,
+            )
         else:
             se = _stub("sentiment", "ANTHROPIC_API_KEY missing")
         state.add(se.agent_id, se)
@@ -305,6 +333,7 @@ def run_pipeline(
     max_analysis_tickers: int | None = None,
     max_cio_tickers: int | None = None,
     max_downstream_tickers: int | None = None,
+    analysis_batch_size: int = DEFAULT_ANALYSIS_BATCH_SIZE,
     settings: Settings | None = None,
 ) -> None:
     settings = settings or get_settings()
@@ -365,7 +394,13 @@ def run_pipeline(
 
         # 3) Technical
         if client:
-            ta = run_technical(settings, ctx, client, analysis_symbols)
+            ta = run_technical_batched(
+                settings,
+                ctx,
+                client,
+                analysis_symbols,
+                batch_size=analysis_batch_size,
+            )
         else:
             ta = _stub("technical_analysis", "ANTHROPIC_API_KEY missing")
         state.add(ta.agent_id, ta)
@@ -378,7 +413,13 @@ def run_pipeline(
 
         # 4) Sentiment
         if client:
-            se = run_sentiment(settings, ctx, client, analysis_symbols)
+            se = run_sentiment_batched(
+                settings,
+                ctx,
+                client,
+                analysis_symbols,
+                batch_size=analysis_batch_size,
+            )
         else:
             se = _stub("sentiment", "ANTHROPIC_API_KEY missing")
         state.add(se.agent_id, se)

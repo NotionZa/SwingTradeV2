@@ -82,6 +82,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Legacy: sets both analysis and CIO caps when the new flags are omitted",
     )
+    p_run.add_argument(
+        "--analysis-batch-size",
+        type=int,
+        default=15,
+        help="Max symbols per Technical/Sentiment LLM call when pool exceeds this (default 15)",
+    )
 
     p_agent = sub.add_parser(
         "run-agent",
@@ -128,6 +134,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Legacy: sets both analysis and CIO caps when the new flags are omitted",
     )
+    p_agent.add_argument(
+        "--analysis-batch-size",
+        type=int,
+        default=15,
+        help="Max symbols per Technical/Sentiment LLM call when pool exceeds this (default 15)",
+    )
 
     sub.add_parser("bot", help="Run Discord watchlist slash-command bot")
 
@@ -159,6 +171,7 @@ def main(argv: list[str] | None = None) -> int:
             max_analysis_tickers=args.max_analysis_tickers,
             max_cio_tickers=args.max_cio_tickers,
             max_downstream_tickers=args.max_downstream_tickers,
+            analysis_batch_size=args.analysis_batch_size,
         )
         return 0
     if args.command == "run-agent":
@@ -171,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
             max_analysis_tickers=args.max_analysis_tickers,
             max_cio_tickers=args.max_cio_tickers,
             max_downstream_tickers=args.max_downstream_tickers,
+            analysis_batch_size=args.analysis_batch_size,
         )
         return 0
     if args.command == "bot":
