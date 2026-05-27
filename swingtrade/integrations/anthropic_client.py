@@ -29,6 +29,7 @@ def complete_json_agent(
     user: str,
     max_tokens: int = 4096,
     timeout_seconds: float | None = None,
+    call_label: str | None = None,
 ) -> dict[str, Any]:
     """Ask model for a single JSON object in the assistant text."""
     api = client
@@ -40,6 +41,10 @@ def complete_json_agent(
         system=system,
         messages=[{"role": "user", "content": user}],
     )
+    if call_label:
+        from swingtrade.anthropic_usage import record_call
+
+        record_call(label=call_label, model=model, message=msg)
     text = _extract_text(msg)
     from swingtrade.json_utils import (
         extract_json_object,

@@ -237,6 +237,7 @@ def run_cio(
         system=load_system_prompt("cio"),
         user=user,
         max_tokens=8192,
+        call_label="cio",
     )
     structured = _normalize_cio_structured(raw)
     raw_decision_count = _count_cio_decisions(structured)

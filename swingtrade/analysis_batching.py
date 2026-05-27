@@ -238,7 +238,9 @@ def run_technical_batched(
     if batch_size <= 0:
         batch_size = DEFAULT_ANALYSIS_BATCH_SIZE
     if len(symbols) <= batch_size:
-        return run_technical(settings, ctx, client, symbols)
+        return run_technical(
+            settings, ctx, client, symbols, call_label="technical"
+        )
 
     batches = chunk_symbols(symbols, batch_size)
     logger.info(
@@ -256,7 +258,15 @@ def run_technical_batched(
             len(batches),
             len(batch),
         )
-        batch_results.append(run_technical(settings, ctx, client, batch))
+        batch_results.append(
+            run_technical(
+                settings,
+                ctx,
+                client,
+                batch,
+                call_label=f"technical batch {idx}/{len(batches)}",
+            )
+        )
 
     merged = merge_technical_structured(
         [r.structured for r in batch_results],
@@ -304,7 +314,9 @@ def run_sentiment_batched(
     if batch_size <= 0:
         batch_size = DEFAULT_ANALYSIS_BATCH_SIZE
     if len(symbols) <= batch_size:
-        return run_sentiment(settings, ctx, client, symbols)
+        return run_sentiment(
+            settings, ctx, client, symbols, call_label="sentiment"
+        )
 
     batches = chunk_symbols(symbols, batch_size)
     logger.info(
@@ -322,7 +334,15 @@ def run_sentiment_batched(
             len(batches),
             len(batch),
         )
-        batch_results.append(run_sentiment(settings, ctx, client, batch))
+        batch_results.append(
+            run_sentiment(
+                settings,
+                ctx,
+                client,
+                batch,
+                call_label=f"sentiment batch {idx}/{len(batches)}",
+            )
+        )
 
     merged = merge_sentiment_structured(
         [r.structured for r in batch_results],

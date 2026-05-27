@@ -15,6 +15,7 @@ from swingtrade.analysis_batching import (
     run_sentiment_batched,
     run_technical_batched,
 )
+from swingtrade.anthropic_usage import begin_run, end_run
 from swingtrade.integrations.http import post_discord_webhook, webhook_client
 from swingtrade.models.agents import (
     AgentResult,
@@ -188,6 +189,8 @@ def run_single_agent(
 
     client = _anthropic_client(settings)
     http = webhook_client(settings.http_timeout_seconds)
+    if client:
+        begin_run(session, dry_run=dry_run)
 
     try:
         if agent == "market_sentiment":
@@ -322,6 +325,8 @@ def run_single_agent(
         if session == "pre_market":
             _post_cio_risk_discord(http, settings, cio, session, dry_run=dry_run)
     finally:
+        if client:
+            end_run()
         http.close()
 
 
@@ -350,6 +355,8 @@ def run_pipeline(
     state = PipelineState(tickers=trade, watchlist_by_category=wl)
 
     http = webhook_client(settings.http_timeout_seconds)
+    if client:
+        begin_run(session, dry_run=dry_run)
     try:
         # 1) Market Sentiment
         if client:
@@ -469,4 +476,6 @@ def run_pipeline(
             dry_run=dry_run,
         )
     finally:
+        if client:
+            end_run()
         http.close()

@@ -802,6 +802,8 @@ def run_technical(
     ctx: RunContext,
     client: Anthropic,
     tickers: list[str],
+    *,
+    call_label: str | None = None,
 ) -> AgentResult:
     per: dict[str, Any] = {}
     qqq = fetch_ohlcv("QQQ", period="6mo")
@@ -828,6 +830,7 @@ def run_technical(
         user=user,
         max_tokens=12288,
         timeout_seconds=300.0,
+        call_label=call_label or "technical",
     )
 
     structured = raw.get("structured")

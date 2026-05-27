@@ -22,6 +22,8 @@ def run_sentiment(
     ctx: RunContext,
     client: Anthropic,
     tickers: list[str],
+    *,
+    call_label: str | None = None,
 ) -> AgentResult:
     if not settings.finnhub_key.strip():
         logger.warning(
@@ -65,6 +67,7 @@ def run_sentiment(
         system=load_system_prompt("sentiment"),
         user=user,
         max_tokens=4096,
+        call_label=call_label or "sentiment",
     )
     md = str(raw.get("discord_markdown", "")).strip() or "_No sentiment output_"
     structured = raw.get("structured")

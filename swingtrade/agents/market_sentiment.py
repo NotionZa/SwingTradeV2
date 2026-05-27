@@ -158,6 +158,7 @@ def run_market_sentiment(
         user=user,
         max_tokens=4096,
         timeout_seconds=120.0,
+        call_label="market_sentiment",
     )
     structured = raw.get("structured")
     if not isinstance(structured, dict):
