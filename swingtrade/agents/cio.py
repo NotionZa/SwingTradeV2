@@ -19,6 +19,37 @@ from swingtrade.settings import Settings
 logger = logging.getLogger(__name__)
 
 
+def _extract_cio_decisions(raw: Any) -> tuple[list[dict[str, Any]], str]:
+    """Extract decision rows from multiple possible model output shapes.
+
+    Returns (decisions, shape_label).
+    """
+    # 1) expected: {"structured": {"decisions": [...]}, ...}
+    if isinstance(raw, dict):
+        structured = raw.get("structured")
+        if isinstance(structured, dict):
+            dec = structured.get("decisions")
+            if isinstance(dec, list):
+                return [d for d in dec if isinstance(d, dict)], "structured.decisions"
+
+        # 2) top-level: {"decisions": [...]}
+        dec2 = raw.get("decisions")
+        if isinstance(dec2, list):
+            return [d for d in dec2 if isinstance(d, dict)], "top_level.decisions"
+
+        # 3) single decision object: {"ticker": "...", "decision": "...", ...}
+        if isinstance(raw.get("decision"), str) and (
+            isinstance(raw.get("ticker"), str) or isinstance(raw.get("symbol"), str)
+        ):
+            return [raw], "top_level.decision_object"
+
+    # 4) top-level list: [{"ticker": "...", ...}, ...]
+    if isinstance(raw, list):
+        return [d for d in raw if isinstance(d, dict)], "top_level.list"
+
+    return [], "none"
+
+
 def _decision_ticker(item: dict[str, Any]) -> str | None:
     raw = item.get("ticker") or item.get("symbol")
     if isinstance(raw, str) and raw.strip():
@@ -91,37 +122,32 @@ def _count_cio_decisions(structured: dict[str, Any]) -> int:
     return n
 
 
-def _normalize_cio_structured(raw: dict[str, Any]) -> dict[str, Any]:
-    structured = raw.get("structured")
-    if not isinstance(structured, dict):
-        structured = {}
+def _normalize_cio_structured(raw: Any) -> tuple[dict[str, Any], str]:
+    """Normalize CIO structured output and return (structured, shape_label)."""
+    shape = "unknown"
+    structured: dict[str, Any] = {}
 
-    decisions = structured.get("decisions")
-    if not isinstance(decisions, list) or not decisions:
-        top_level = raw.get("decisions")
-        if isinstance(top_level, list) and top_level:
-            logger.warning(
-                "CIO: hoisting %s top-level decisions into structured.decisions",
-                len(top_level),
-            )
-            structured = {**structured, "decisions": top_level}
-            decisions = top_level
+    if isinstance(raw, dict):
+        s = raw.get("structured")
+        if isinstance(s, dict):
+            structured = dict(s)
+
+    decisions, shape = _extract_cio_decisions(raw)
+    if shape != "structured.decisions" and decisions:
+        logger.warning("CIO normalization used fallback shape: %s", shape)
 
     # Normalize decision rows so downstream logger can key by `ticker`.
-    if isinstance(decisions, list) and decisions:
-        normalized: list[dict[str, Any]] = []
-        for item in decisions:
-            if not isinstance(item, dict):
-                continue
-            out = dict(item)
-            if "ticker" not in out or not str(out.get("ticker") or "").strip():
-                sym = out.get("symbol")
-                if isinstance(sym, str) and sym.strip():
-                    out["ticker"] = sym.strip().upper()
-            normalized.append(out)
-        structured = {**structured, "decisions": normalized}
+    normalized: list[dict[str, Any]] = []
+    for item in decisions:
+        out = dict(item)
+        if "ticker" not in out or not str(out.get("ticker") or "").strip():
+            sym = out.get("symbol")
+            if isinstance(sym, str) and sym.strip():
+                out["ticker"] = sym.strip().upper()
+        normalized.append(out)
 
-    return structured
+    structured = {**structured, "decisions": normalized}
+    return structured, shape
 
 
 def _resolve_cio_discord_markdown(raw: dict[str, Any], structured: dict[str, Any]) -> str:
@@ -135,6 +161,39 @@ def _resolve_cio_discord_markdown(raw: dict[str, Any], structured: dict[str, Any
         )
         return nested.strip()
     return ""
+
+
+def _fallback_cio_discord_from_decisions(
+    decisions: list[dict[str, Any]],
+    session: str | SessionName,
+) -> str:
+    """Build minimal CIO markdown when model markdown is missing but decisions exist."""
+    session_label = str(session).replace("_", " ").title()
+    buckets: dict[str, list[str]] = {"BUY": [], "WATCH": [], "PASS": [], "BLOCKED": []}
+    for d in decisions:
+        if not isinstance(d, dict):
+            continue
+        sym = _decision_ticker(d) or ""
+        dec = str(d.get("decision") or "").strip().upper()
+        if not sym or dec not in buckets:
+            continue
+        buckets[dec].append(sym)
+
+    lines = [f"🧠 **SwingTrader — CIO Decision Brief | {session_label}**", ""]
+    for key, title in (
+        ("BUY", "🟢 BUY"),
+        ("WATCH", "🟡 WATCH"),
+        ("PASS", "⚪ PASS"),
+        ("BLOCKED", "🔴 BLOCKED"),
+    ):
+        syms = sorted(set(buckets[key]))
+        lines.append(f"**{title}** ({len(syms)})")
+        if syms:
+            lines.append(", ".join(f"`{s}`" for s in syms))
+        else:
+            lines.append("_(none)_")
+        lines.append("")
+    return "\n".join(lines).strip()
 
 
 def _summary_int(summary: dict[str, Any], key: str) -> int:
@@ -239,10 +298,14 @@ def run_cio(
         max_tokens=8192,
         call_label="cio",
     )
-    structured = _normalize_cio_structured(raw)
+    structured, _shape = _normalize_cio_structured(raw)
     raw_decision_count = _count_cio_decisions(structured)
     structured = _filter_cio_decisions_to_pool(structured, cio_symbols)
-    md = _resolve_cio_discord_markdown(raw, structured) or "_No CIO output_"
+    md = _resolve_cio_discord_markdown(raw, structured)
+    if not md and isinstance(structured.get("decisions"), list) and structured["decisions"]:
+        logger.warning("CIO markdown missing; built fallback markdown from decisions")
+        md = _fallback_cio_discord_from_decisions(structured["decisions"], ctx.session)
+    md = md or "_No CIO output_"
 
     decision_count = _count_cio_decisions(structured)
     logger.info(

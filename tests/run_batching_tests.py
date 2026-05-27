@@ -182,7 +182,7 @@ def t_cio_normalize_hoist_decisions():
         "structured": {"summary": {"session": "post_market"}},
         "decisions": [{"symbol": "NVDA", "decision": "WATCH"}],
     }
-    structured = _normalize_cio_structured(raw)
+    structured, _shape = _normalize_cio_structured(raw)
     assert _count_cio_decisions(structured) == 1
     assert structured["decisions"][0]["ticker"] == "NVDA"
 
