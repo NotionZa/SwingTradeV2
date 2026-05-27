@@ -196,6 +196,119 @@ def _fallback_cio_discord_from_decisions(
     return "\n".join(lines).strip()
 
 
+def _fallback_decision_row(ticker: str) -> dict[str, Any]:
+    return {
+        "ticker": ticker,
+        "decision": "WATCH",
+        "direction": "Long",
+        "conviction": "Low",
+        "source": "system_fallback",
+        "reason": (
+            "CIO omitted ticker from response; preserving CIO-pool candidate for "
+            "operator review based on technical/sentiment screening."
+        ),
+        "action_required": "Manual review required before trade.",
+    }
+
+
+def _complete_cio_decisions_to_pool(
+    structured: dict[str, Any],
+    cio_symbols: list[str],
+) -> tuple[dict[str, Any], list[str]]:
+    """Ensure one decision row per CIO pool ticker by appending fallback WATCH rows."""
+    decisions_raw = structured.get("decisions")
+    decisions = decisions_raw if isinstance(decisions_raw, list) else []
+    final: list[dict[str, Any]] = []
+    by_symbol: dict[str, dict[str, Any]] = {}
+    for item in decisions:
+        if not isinstance(item, dict):
+            continue
+        sym = _decision_ticker(item)
+        if not sym:
+            continue
+        row = dict(item)
+        row["ticker"] = sym
+        by_symbol[sym] = row
+
+    ordered_pool = [s.strip().upper() for s in cio_symbols if isinstance(s, str) and s.strip()]
+    missing: list[str] = []
+    for sym in ordered_pool:
+        row = by_symbol.get(sym)
+        if row is None:
+            missing.append(sym)
+            final.append(_fallback_decision_row(sym))
+            continue
+        final.append(row)
+    return {**structured, "decisions": final}, missing
+
+
+def _decision_buckets(decisions_raw: Any) -> tuple[int, int, int, int]:
+    buy = watch = passed = blocked = 0
+    if not isinstance(decisions_raw, list):
+        return buy, watch, passed, blocked
+    for item in decisions_raw:
+        if not isinstance(item, dict):
+            continue
+        dec = str(item.get("decision") or "").strip().upper()
+        if dec == "BUY":
+            buy += 1
+        elif dec == "WATCH":
+            watch += 1
+        elif dec == "PASS":
+            passed += 1
+        elif dec == "BLOCKED":
+            blocked += 1
+    return buy, watch, passed, blocked
+
+
+def _highest_buy_ticker(decisions_raw: Any) -> str | None:
+    if not isinstance(decisions_raw, list):
+        return None
+    buys: list[dict[str, Any]] = []
+    for item in decisions_raw:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("decision") or "").strip().upper() != "BUY":
+            continue
+        sym = _decision_ticker(item)
+        if not sym:
+            continue
+        row = dict(item)
+        row["ticker"] = sym
+        buys.append(row)
+    if not buys:
+        return None
+
+    def _score(x: dict[str, Any]) -> float:
+        raw = x.get("cio_score")
+        if isinstance(raw, (int, float)):
+            return float(raw)
+        if isinstance(raw, str):
+            try:
+                return float(raw.strip())
+            except ValueError:
+                return float("-inf")
+        return float("-inf")
+
+    best = max(buys, key=_score)
+    best_score = _score(best)
+    if best_score == float("-inf"):
+        return str(best.get("ticker"))
+    return str(best.get("ticker"))
+
+
+def _summary_counts_usable(summary: dict[str, Any], decisions_count: int) -> bool:
+    keys = ("buy_count", "watch_count", "pass_count", "blocked_count")
+    if any(k not in summary for k in keys):
+        return False
+    counts = [_summary_int(summary, k) for k in keys]
+    if decisions_count > 0 and sum(counts) == 0:
+        return False
+    if decisions_count > 0 and sum(counts) != decisions_count:
+        return False
+    return True
+
+
 def _summary_int(summary: dict[str, Any], key: str) -> int:
     v = summary.get(key)
     if isinstance(v, bool):
@@ -223,6 +336,18 @@ def build_cio_risk_markdown(result: AgentResult, session: str | SessionName) -> 
     summary = structured.get("summary")
     if not isinstance(summary, dict):
         summary = {}
+    decisions = structured.get("decisions")
+    decision_count = _count_cio_decisions(structured)
+    buy, watch, passed, blocked = _decision_buckets(decisions)
+    use_derived_counts = decision_count > 0 and not _summary_counts_usable(
+        summary, decision_count
+    )
+    buy_count = buy if use_derived_counts else _summary_int(summary, "buy_count")
+    watch_count = watch if use_derived_counts else _summary_int(summary, "watch_count")
+    pass_count = passed if use_derived_counts else _summary_int(summary, "pass_count")
+    blocked_count = (
+        blocked if use_derived_counts else _summary_int(summary, "blocked_count")
+    )
 
     notes = structured.get("notes")
     notes_text = notes.strip() if isinstance(notes, str) else ""
@@ -232,11 +357,15 @@ def build_cio_risk_markdown(result: AgentResult, session: str | SessionName) -> 
     )
     risk_notes = notes_text or session_message_text or "_No risk notes._"
 
-    highest = summary.get("highest_conviction_ticker")
-    if highest is None or (isinstance(highest, str) and not highest.strip()):
-        highest_display = "None"
+    derived_highest = _highest_buy_ticker(decisions) if decision_count > 0 else None
+    if derived_highest:
+        highest_display = derived_highest
     else:
-        highest_display = str(highest).strip()
+        highest = summary.get("highest_conviction_ticker")
+        if highest is None or (isinstance(highest, str) and not highest.strip()):
+            highest_display = "None"
+        else:
+            highest_display = str(highest).strip()
 
     session_label = str(session).replace("_", " ").title()
 
@@ -246,10 +375,10 @@ def build_cio_risk_markdown(result: AgentResult, session: str | SessionName) -> 
         f"**Regime:** {_summary_str(summary, 'market_regime')}\n"
         f"**Tech Bias:** {_summary_str(summary, 'tech_bias')}\n\n"
         f"**Decision Counts**\n"
-        f"BUY: {_summary_int(summary, 'buy_count')}\n"
-        f"WATCH: {_summary_int(summary, 'watch_count')}\n"
-        f"PASS: {_summary_int(summary, 'pass_count')}\n"
-        f"BLOCKED: {_summary_int(summary, 'blocked_count')}\n\n"
+        f"BUY: {buy_count}\n"
+        f"WATCH: {watch_count}\n"
+        f"PASS: {pass_count}\n"
+        f"BLOCKED: {blocked_count}\n\n"
         f"**Highest Conviction:** {highest_display}\n\n"
         f"**Risk Notes**\n"
         f"{risk_notes}\n\n"
@@ -301,15 +430,28 @@ def run_cio(
     structured, _shape = _normalize_cio_structured(raw)
     raw_decision_count = _count_cio_decisions(structured)
     structured = _filter_cio_decisions_to_pool(structured, cio_symbols)
+    structured, missing = _complete_cio_decisions_to_pool(structured, cio_symbols)
+    if missing:
+        logger.warning(
+            "CIO completion added %s fallback decision(s) for missing tickers: %s",
+            len(missing),
+            ", ".join(missing),
+        )
+    decision_count = _count_cio_decisions(structured)
+    logger.info(
+        "CIO final decision count after completion: %s/%s",
+        decision_count,
+        len(cio_symbols),
+    )
+
     md = _resolve_cio_discord_markdown(raw, structured)
     if not md and isinstance(structured.get("decisions"), list) and structured["decisions"]:
         logger.warning("CIO markdown missing; built fallback markdown from decisions")
         md = _fallback_cio_discord_from_decisions(structured["decisions"], ctx.session)
     md = md or "_No CIO output_"
 
-    decision_count = _count_cio_decisions(structured)
     logger.info(
-        "CIO decisions returned: %s raw -> %s accepted (pool=%s)",
+        "CIO decisions returned: %s raw -> %s final (pool=%s)",
         raw_decision_count,
         decision_count,
         len(cio_symbols),
