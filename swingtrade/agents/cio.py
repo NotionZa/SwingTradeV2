@@ -18,6 +18,9 @@ from swingtrade.settings import Settings
 
 logger = logging.getLogger(__name__)
 
+# Opus CIO JSON for 12 tickers can exceed 8k output tokens when verbose; 12k reduces truncation.
+CIO_MAX_OUTPUT_TOKENS = 12288
+
 
 def _extract_cio_decisions(raw: Any) -> tuple[list[dict[str, Any]], str]:
     """Extract decision rows from multiple possible model output shapes.
@@ -424,7 +427,7 @@ def run_cio(
         model=settings.anthropic_model_opus,
         system=load_system_prompt("cio"),
         user=user,
-        max_tokens=8192,
+        max_tokens=CIO_MAX_OUTPUT_TOKENS,
         call_label="cio",
     )
     structured, _shape = _normalize_cio_structured(raw)

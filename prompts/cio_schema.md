@@ -2,13 +2,7 @@
 
 ## Limits
 
-- Output must be valid JSON.
-
-- `discord_markdown` must stay under 18,000 characters.
-
-- Do not use markdown tables in `discord_markdown`.
-
-- Use grouped Discord sections instead.
+- Output must be valid **compact JSON** only (no preamble, no code fences).
 
 - Return one top-level JSON object only.
 
@@ -18,6 +12,24 @@
 
   - `structured`
 
+- `discord_markdown` may be an **empty string** `""`. Python formats Discord from `structured.decisions` when empty. If non-empty, stay under 18,000 characters; no markdown tables; use grouped sections only; no long prose paragraphs.
+
+- `structured.decisions` must contain **exactly one object per ticker** in `cio_review_tickers` from the user payload — no extras, no omissions.
+
+- Do **not** return only the best trade.
+
+- Do **not** return a single top-level decision object without `structured.decisions`.
+
+- Example: if `cio_review_tickers` has 12 symbols, `decisions` length must be **12**.
+
+- Per-decision brevity (hard limits):
+
+  - `reason`: max **25 words**
+
+  - `technical_thesis`: max **35 words**
+
+  - `action_required`: max **20 words**
+
 ---
 
 ## Top-level keys
@@ -26,7 +38,7 @@
 
 |---|---|---|
 
-| `discord_markdown` | string | Final CIO decision briefing for Discord. |
+| `discord_markdown` | string | Optional briefing for Discord; `""` allowed (app builds from `structured.decisions`). |
 
 | `structured` | object | Machine-readable CIO output. Must include `decisions`, `summary`, and `notes`. |
 
@@ -38,7 +50,7 @@
 
 |---|---|---|---|
 
-| `decisions` | array of objects | Yes | One object per ticker in `cio_review_tickers` only; do not add symbols outside that list. |
+| `decisions` | array of objects | Yes | **Exactly one** object per ticker in `cio_review_tickers` only (e.g. 12 tickers → length 12). Do not add symbols outside that list. |
 
 | `summary` | object | Yes | Session-level CIO summary. |
 
@@ -110,7 +122,7 @@
 
 | `market_regime` | string | Yes | Regime used by CIO. |
 
-| `technical_thesis` | string | Yes | CIO interpretation of the technical setup. |
+| `technical_thesis` | string | Yes | CIO interpretation of the technical setup. Max **35 words**. |
 
 | `sentiment_catalyst` | string | Yes | Catalyst/sentiment context. Use `"Neutral / no material catalyst"` if none. |
 
@@ -120,9 +132,9 @@
 
 | `invalidation_conditions` | array of strings | Yes | What invalidates the setup. |
 
-| `action_required` | string | Yes | What the human should do next. |
+| `action_required` | string | Yes | What the human should do next. Max **20 words**. |
 
-| `reason` | string | Yes | Clear reason for the decision. |
+| `reason` | string | Yes | Clear reason for the decision. Max **25 words**. |
 
 | `revisit_condition` | string or null | Yes | What would need to change to revisit a PASS/BLOCKED/WATCH. |
 
