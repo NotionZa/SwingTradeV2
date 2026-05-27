@@ -9,6 +9,7 @@ from pathlib import Path
 from swingtrade.candidate_review import export_candidate_review_csv
 from swingtrade.discord_bot import run_bot
 from swingtrade.logging_config import configure_logging
+from swingtrade.model_guard import check_models
 from swingtrade.pipeline import (
     SingleAgentName,
     run_pipeline,
@@ -142,6 +143,15 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     sub.add_parser("bot", help="Run Discord watchlist slash-command bot")
+    p_models = sub.add_parser(
+        "check-models",
+        help="Validate configured Anthropic model IDs against policy/cache",
+    )
+    p_models.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Refresh local Anthropic model cache from provider models-list endpoint",
+    )
 
     p_review = sub.add_parser(
         "review-candidates",
@@ -198,5 +208,26 @@ def main(argv: list[str] | None = None) -> int:
             logger.error("%s", e)
             return 1
         print(out)
+        return 0
+    if args.command == "check-models":
+        get_settings.cache_clear()  # type: ignore[attr-defined]
+        settings = get_settings()
+        try:
+            result = check_models(settings, refresh=bool(args.refresh))
+        except ValueError as e:
+            logger.error("%s", e)
+            return 1
+        print("Anthropic model validation: OK")
+        for entry in sorted(result.entries, key=lambda x: x.family):
+            print(f"- {entry.family}: {entry.model_id} ({entry.status})")
+        if result.cache_path:
+            age = (
+                f"{result.cache_age_days:.1f}d"
+                if isinstance(result.cache_age_days, (int, float))
+                else "unknown"
+            )
+            print(f"- cache: {result.cache_path} (age={age})")
+        for w in result.warnings:
+            print(f"- warning: {w}")
         return 0
     return 2

@@ -17,6 +17,7 @@ from swingtrade.analysis_batching import (
 )
 from swingtrade.anthropic_usage import begin_run, end_run
 from swingtrade.integrations.http import post_discord_webhook, webhook_client
+from swingtrade.model_guard import validate_configured_models
 from swingtrade.models.agents import (
     AgentResult,
     PipelineState,
@@ -56,6 +57,18 @@ def _anthropic_client(settings: Settings) -> Anthropic | None:
     from swingtrade.integrations.anthropic_client import make_anthropic_client
 
     return make_anthropic_client(settings)
+
+
+def _validate_models_for_run(settings: Settings, client: Anthropic | None) -> None:
+    if client is None:
+        return
+    res = validate_configured_models(settings)
+    configured = ", ".join(
+        f"{entry.family}={entry.model_id}" for entry in sorted(res.entries, key=lambda x: x.family)
+    )
+    logger.info("Anthropic model validation: OK (%s)", configured)
+    for w in res.warnings:
+        logger.warning("Anthropic model validation warning: %s", w)
 
 
 def format_news_digest(sentiment_structured: dict[str, Any]) -> str:
@@ -188,6 +201,7 @@ def run_single_agent(
     trade = [t for t in merged if t not in ctx_only][:max_tickers]
 
     client = _anthropic_client(settings)
+    _validate_models_for_run(settings, client)
     http = webhook_client(settings.http_timeout_seconds)
     if client:
         begin_run(session, dry_run=dry_run)
@@ -351,6 +365,7 @@ def run_pipeline(
     trade = [t for t in merged if t not in ctx_only][:max_tickers]
 
     client = _anthropic_client(settings)
+    _validate_models_for_run(settings, client)
 
     state = PipelineState(tickers=trade, watchlist_by_category=wl)
 
