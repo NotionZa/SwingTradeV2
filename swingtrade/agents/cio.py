@@ -300,18 +300,6 @@ def _highest_buy_ticker(decisions_raw: Any) -> str | None:
     return str(best.get("ticker"))
 
 
-def _summary_counts_usable(summary: dict[str, Any], decisions_count: int) -> bool:
-    keys = ("buy_count", "watch_count", "pass_count", "blocked_count")
-    if any(k not in summary for k in keys):
-        return False
-    counts = [_summary_int(summary, k) for k in keys]
-    if decisions_count > 0 and sum(counts) == 0:
-        return False
-    if decisions_count > 0 and sum(counts) != decisions_count:
-        return False
-    return True
-
-
 def _summary_int(summary: dict[str, Any], key: str) -> int:
     v = summary.get(key)
     if isinstance(v, bool):
@@ -342,15 +330,13 @@ def build_cio_risk_markdown(result: AgentResult, session: str | SessionName) -> 
     decisions = structured.get("decisions")
     decision_count = _count_cio_decisions(structured)
     buy, watch, passed, blocked = _decision_buckets(decisions)
-    use_derived_counts = decision_count > 0 and not _summary_counts_usable(
-        summary, decision_count
-    )
-    buy_count = buy if use_derived_counts else _summary_int(summary, "buy_count")
-    watch_count = watch if use_derived_counts else _summary_int(summary, "watch_count")
-    pass_count = passed if use_derived_counts else _summary_int(summary, "pass_count")
-    blocked_count = (
-        blocked if use_derived_counts else _summary_int(summary, "blocked_count")
-    )
+    if decision_count > 0:
+        buy_count, watch_count, pass_count, blocked_count = buy, watch, passed, blocked
+    else:
+        buy_count = _summary_int(summary, "buy_count")
+        watch_count = _summary_int(summary, "watch_count")
+        pass_count = _summary_int(summary, "pass_count")
+        blocked_count = _summary_int(summary, "blocked_count")
 
     notes = structured.get("notes")
     notes_text = notes.strip() if isinstance(notes, str) else ""
@@ -360,9 +346,8 @@ def build_cio_risk_markdown(result: AgentResult, session: str | SessionName) -> 
     )
     risk_notes = notes_text or session_message_text or "_No risk notes._"
 
-    derived_highest = _highest_buy_ticker(decisions) if decision_count > 0 else None
-    if derived_highest:
-        highest_display = derived_highest
+    if decision_count > 0:
+        highest_display = _highest_buy_ticker(decisions) or "None"
     else:
         highest = summary.get("highest_conviction_ticker")
         if highest is None or (isinstance(highest, str) and not highest.strip()):

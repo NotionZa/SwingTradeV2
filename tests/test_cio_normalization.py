@@ -122,21 +122,31 @@ def test_fallback_markdown_counts_reflect_completed_decisions():
     assert "**🟡 WATCH** (2)" in md
 
 
-def test_risk_summary_uses_completed_decisions_when_summary_counts_invalid():
+def test_risk_summary_counts_always_follow_final_decisions():
     structured = {
         "summary": {
             "overall_risk_level": "Moderate",
             "market_regime": "choppy",
             "tech_bias": "selective",
             "buy_count": 0,
-            "watch_count": 0,
-            "pass_count": 0,
+            "watch_count": 5,
+            "pass_count": 7,
             "blocked_count": 0,
+            "highest_conviction_ticker": "MU",
         },
         "decisions": [
-            {"ticker": "KLAC", "decision": "BUY", "cio_score": 7.8},
-            {"ticker": "NVDA", "decision": "WATCH", "source": "system_fallback"},
-            {"ticker": "AMD", "decision": "WATCH", "source": "system_fallback"},
+            {"ticker": "AAPL", "decision": "WATCH"},
+            {"ticker": "MSFT", "decision": "WATCH"},
+            {"ticker": "NVDA", "decision": "WATCH"},
+            {"ticker": "AMD", "decision": "WATCH"},
+            {"ticker": "KLAC", "decision": "WATCH"},
+            {"ticker": "MU", "decision": "WATCH"},
+            {"ticker": "META", "decision": "PASS"},
+            {"ticker": "AMZN", "decision": "PASS"},
+            {"ticker": "AVGO", "decision": "PASS"},
+            {"ticker": "QCOM", "decision": "PASS"},
+            {"ticker": "TSM", "decision": "PASS"},
+            {"ticker": "ASML", "decision": "PASS"},
         ],
     }
     result = AgentResult(
@@ -146,10 +156,37 @@ def test_risk_summary_uses_completed_decisions_when_summary_counts_invalid():
         model_used="claude-opus-4-7",
     )
     md = build_cio_risk_markdown(result, "pre_market")
-    assert "BUY: 1" in md
-    assert "WATCH: 2" in md
-    assert "PASS: 0" in md
+    assert "BUY: 0" in md
+    assert "WATCH: 6" in md
+    assert "PASS: 6" in md
     assert "BLOCKED: 0" in md
+    assert "Highest Conviction:** None" in md
+
+
+def test_risk_summary_highest_conviction_is_highest_scored_buy():
+    structured = {
+        "summary": {
+            "overall_risk_level": "Low",
+            "market_regime": "bull_trending",
+            "tech_bias": "favorable",
+            "highest_conviction_ticker": "SHOULD_NOT_OVERRIDE_BUY_LOGIC",
+        },
+        "decisions": [
+            {"ticker": "NVDA", "decision": "BUY", "cio_score": 7.2},
+            {"ticker": "KLAC", "decision": "BUY", "cio_score": 8.6},
+            {"ticker": "AMD", "decision": "BUY", "cio_score": 8.1},
+            {"ticker": "MSFT", "decision": "WATCH"},
+        ],
+    }
+    result = AgentResult(
+        agent_id="cio",
+        discord_markdown="",
+        structured=structured,
+        model_used="claude-opus-4-7",
+    )
+    md = build_cio_risk_markdown(result, "pre_market")
+    assert "BUY: 3" in md
+    assert "WATCH: 1" in md
     assert "Highest Conviction:** KLAC" in md
 
 
@@ -164,7 +201,8 @@ if __name__ == "__main__":
         test_completion_adds_watch_fallback_for_missing_pool_rows,
         test_completion_still_drops_symbols_outside_pool,
         test_fallback_markdown_counts_reflect_completed_decisions,
-        test_risk_summary_uses_completed_decisions_when_summary_counts_invalid,
+        test_risk_summary_counts_always_follow_final_decisions,
+        test_risk_summary_highest_conviction_is_highest_scored_buy,
     ]
     failed = 0
     for t in tests:
