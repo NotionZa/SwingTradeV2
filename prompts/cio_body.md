@@ -32,6 +32,8 @@ and produce:
 
 2. Structured decisions — one row/object per ticker decision.
 
+Return `structured.decisions` **only** for tickers listed in `cio_review_tickers` in the user payload. Do not introduce symbols that are not in that list.
+
 You are not an execution agent.
 
 You do not place trades.

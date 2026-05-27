@@ -38,7 +38,7 @@
 
 |---|---|---|---|
 
-| `decisions` | array of objects | Yes | One object per ticker decision. |
+| `decisions` | array of objects | Yes | One object per ticker in `cio_review_tickers` only; do not add symbols outside that list. |
 
 | `summary` | object | Yes | Session-level CIO summary. |
 
