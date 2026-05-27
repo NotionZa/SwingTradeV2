@@ -69,12 +69,14 @@ def test_filter_drops_outside_pool_and_blank():
 
 
 def test_fallback_markdown_non_empty():
-    decisions = [
-        {"ticker": "NVDA", "decision": "BUY"},
-        {"ticker": "AMD", "decision": "WATCH"},
-        {"ticker": "MSFT", "decision": "PASS"},
-    ]
-    md = _fallback_cio_discord_from_decisions(decisions, "pre_market")
+    structured = {
+        "decisions": [
+            {"ticker": "NVDA", "decision": "BUY"},
+            {"ticker": "AMD", "decision": "WATCH"},
+            {"ticker": "MSFT", "decision": "PASS"},
+        ],
+    }
+    md = _fallback_cio_discord_from_decisions(structured, "pre_market")
     assert "CIO Decision Brief" in md
     assert "`NVDA`" in md
 
@@ -112,14 +114,121 @@ def test_completion_still_drops_symbols_outside_pool():
 
 
 def test_fallback_markdown_counts_reflect_completed_decisions():
-    decisions = [
-        {"ticker": "KLAC", "decision": "BUY"},
-        {"ticker": "NVDA", "decision": "WATCH", "source": "system_fallback"},
-        {"ticker": "AMD", "decision": "WATCH", "source": "system_fallback"},
-    ]
-    md = _fallback_cio_discord_from_decisions(decisions, "pre_market")
-    assert "**🟢 BUY** (1)" in md
-    assert "**🟡 WATCH** (2)" in md
+    structured = {
+        "decisions": [
+            {"ticker": "KLAC", "decision": "BUY"},
+            {"ticker": "NVDA", "decision": "WATCH", "source": "system_fallback"},
+            {"ticker": "AMD", "decision": "WATCH", "source": "system_fallback"},
+        ],
+    }
+    md = _fallback_cio_discord_from_decisions(structured, "pre_market")
+    assert "**BUY Candidates** (1)" in md
+    assert "**WATCH Candidates** (2)" in md
+
+
+def test_fallback_markdown_includes_market_context():
+    structured = {
+        "summary": {
+            "market_regime": "choppy",
+            "tech_bias": "selective longs",
+            "overall_risk_level": "Medium",
+            "session_message": "Stay selective until volume confirms.",
+        },
+        "decisions": [{"ticker": "NVDA", "decision": "PASS", "reason": "Weak R/R"}],
+    }
+    md = _fallback_cio_discord_from_decisions(structured, "pre_market")
+    assert "Market Context" in md
+    assert "choppy" in md
+    assert "selective longs" in md
+    assert "Medium" in md
+
+
+def test_fallback_markdown_includes_buy_trade_details():
+    structured = {
+        "decisions": [
+            {
+                "ticker": "KLAC",
+                "decision": "BUY",
+                "direction": "Long",
+                "strategy": "Momentum",
+                "conviction": "High",
+                "entry_zone": "680-685",
+                "stop_loss": 665,
+                "target": 720,
+                "risk_reward": 2.8,
+                "technical_thesis": "Pullback held above 20dma with RS improving.",
+                "reason": "Clean momentum continuation setup.",
+                "invalidation_conditions": ["Close below 665"],
+                "action_required": "Enter on open above 682.",
+            },
+        ],
+    }
+    md = _fallback_cio_discord_from_decisions(structured, "pre_market")
+    assert "BUY Candidates" in md
+    assert "Entry:" in md
+    assert "680-685" in md
+    assert "Stop:" in md
+    assert "Target:" in md
+
+
+def test_fallback_markdown_includes_watch_details():
+    structured = {
+        "decisions": [
+            {
+                "ticker": "AMD",
+                "decision": "WATCH",
+                "direction": "Long",
+                "strategy": "Pullback",
+                "reason": "Structure improving but volume light.",
+                "technical_thesis": "Needs breakout above resistance.",
+                "revisit_condition": "Upgrade on volume > 20d avg.",
+                "action_required": "Wait for confirmation.",
+            },
+        ],
+    }
+    md = _fallback_cio_discord_from_decisions(structured, "pre_market")
+    assert "WATCH Candidates" in md
+    assert "Case:" in md
+    assert "Trigger:" in md
+
+
+def test_fallback_markdown_summarizes_pass_and_blocked():
+    structured = {
+        "decisions": [
+            {"ticker": "META", "decision": "PASS", "reason": "No clean setup."},
+            {
+                "ticker": "TSLA",
+                "decision": "BLOCKED",
+                "reason": "Earnings gate.",
+                "revisit_condition": "After earnings window.",
+            },
+        ],
+    }
+    md = _fallback_cio_discord_from_decisions(structured, "pre_market")
+    assert "PASS / BLOCKED Summary" in md
+    assert "`META`" in md
+    assert "PASS" in md
+    assert "`TSLA`" in md
+    assert "BLOCKED" in md
+
+
+def test_fallback_markdown_handles_sparse_system_fallback_watch():
+    structured = {
+        "decisions": [
+            {
+                "ticker": "NVDA",
+                "decision": "WATCH",
+                "source": "system_fallback",
+                "reason": "CIO omitted ticker from response.",
+                "action_required": "Manual review required before trade.",
+            },
+        ],
+    }
+    md = _fallback_cio_discord_from_decisions(structured, "pre_market")
+    assert "WATCH Candidates" in md
+    assert "`NVDA`" in md
+    assert "Reason:" in md
+    assert "Action:" in md
 
 
 def test_risk_summary_counts_always_follow_final_decisions():
@@ -201,6 +310,11 @@ if __name__ == "__main__":
         test_completion_adds_watch_fallback_for_missing_pool_rows,
         test_completion_still_drops_symbols_outside_pool,
         test_fallback_markdown_counts_reflect_completed_decisions,
+        test_fallback_markdown_includes_market_context,
+        test_fallback_markdown_includes_buy_trade_details,
+        test_fallback_markdown_includes_watch_details,
+        test_fallback_markdown_summarizes_pass_and_blocked,
+        test_fallback_markdown_handles_sparse_system_fallback_watch,
         test_risk_summary_counts_always_follow_final_decisions,
         test_risk_summary_highest_conviction_is_highest_scored_buy,
     ]
