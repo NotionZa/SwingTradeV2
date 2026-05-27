@@ -70,6 +70,19 @@ python -m swingtrade run --session post_market --max-tickers 25
 python -m swingtrade bot
 ```
 
+## Operator / Cursor Prompts
+
+Operational prompts and runbooks live under [`docs/prompts/`](docs/prompts):
+
+- [`docs/prompts/00_cursor_safety.md`](docs/prompts/00_cursor_safety.md)
+- [`docs/prompts/01_pipeline_runbooks.md`](docs/prompts/01_pipeline_runbooks.md)
+- [`docs/prompts/02_phase_m_universe.md`](docs/prompts/02_phase_m_universe.md)
+- [`docs/prompts/03_phase_n_batching_cio.md`](docs/prompts/03_phase_n_batching_cio.md)
+- [`docs/prompts/04_phase_l_cost_model_guardrails.md`](docs/prompts/04_phase_l_cost_model_guardrails.md)
+- [`docs/prompts/05_debugging_and_recovery.md`](docs/prompts/05_debugging_and_recovery.md)
+- [`docs/prompts/06_dev_handoff.md`](docs/prompts/06_dev_handoff.md)
+- [`docs/prompts/07_future_learning_sqlite.md`](docs/prompts/07_future_learning_sqlite.md)
+
 ### Run one agent only (`run-agent`)
 
 Use this when you want a **single** step (e.g. Technical) without running the full pipeline. The app still posts that agent’s **normal** Discord webhook(s). Some agents **run upstream steps in memory only** (no Discord) so inputs match the full pipeline—for example **Technical** runs **Hard Veto** first to get survivors, then TA, then posts to the **watchlist** webhook only.
