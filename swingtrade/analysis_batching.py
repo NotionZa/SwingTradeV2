@@ -153,40 +153,11 @@ def merge_sentiment_structured(
     }
 
 
-def _market_news_section(structured: dict[str, Any]) -> list[str]:
-    """## Market news section from merged raw_bundle (compatible with format_news_digest)."""
-    raw = structured.get("raw_bundle") or {}
-    per = (raw.get("per_ticker") or {}) if isinstance(raw, dict) else {}
-    lines = ["## Market news", ""]
-    if not isinstance(per, dict) or not per:
-        lines.append("_No headline bundle._")
-        return lines
-
-    for sym in sorted(per.keys()):
-        block = per[sym]
-        if not isinstance(block, dict):
-            continue
-        news = block.get("news") or []
-        lines.append(f"**{sym}**")
-        if not news:
-            lines.append("- _(no headlines)_")
-            lines.append("")
-            continue
-        for item in news[:4]:
-            if not isinstance(item, dict):
-                continue
-            title = item.get("headline") or item.get("title") or ""
-            src = item.get("source") or ""
-            lines.append(f"- {title} _({src})_")
-        lines.append("")
-    return lines
-
-
 def sentiment_discord_markdown_from_structured(
     structured: dict[str, Any],
     session: str,
 ) -> str:
-    """Deterministic Sentiment/Macro Discord post from merged structured output."""
+    """Deterministic Sentiment/Macro Discord post (no headline digest; see format_news_digest)."""
     session_l = str(session).replace("_", " ").title()
     macro = structured.get("macro")
     if not isinstance(macro, dict):
@@ -222,7 +193,6 @@ def sentiment_discord_markdown_from_structured(
             lines.append(f"- **{sym}** ({s}/10): {c}")
         lines.append("")
 
-    lines.extend(_market_news_section(structured))
     md = "\n".join(lines).strip()
     return md or "_No sentiment output_"
 
@@ -314,8 +284,17 @@ def run_sentiment_batched(
     if batch_size <= 0:
         batch_size = DEFAULT_ANALYSIS_BATCH_SIZE
     if len(symbols) <= batch_size:
-        return run_sentiment(
+        result = run_sentiment(
             settings, ctx, client, symbols, call_label="sentiment"
+        )
+        md = sentiment_discord_markdown_from_structured(
+            result.structured, ctx.session
+        )
+        return AgentResult(
+            agent_id=result.agent_id,
+            discord_markdown=md,
+            structured=result.structured,
+            model_used=result.model_used,
         )
 
     batches = chunk_symbols(symbols, batch_size)
