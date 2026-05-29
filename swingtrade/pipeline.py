@@ -481,8 +481,7 @@ def run_pipeline(
             cio.discord_markdown,
             dry_run=dry_run,
         )
-        if session == "pre_market":
-            _post_cio_risk_discord(http, settings, cio, session, dry_run=dry_run)
+        _post_cio_risk_discord(http, settings, cio, session, dry_run=dry_run)
         log_pipeline_candidates(
             state,
             session,
