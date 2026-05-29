@@ -24,6 +24,9 @@ CIO_MAX_OUTPUT_TOKENS = 12288
 _CIO_DISCORD_MAX_BUY_DETAIL = 3
 _CIO_DISCORD_MAX_WATCH_DETAIL = 6
 _CIO_DISCORD_FIELD_MAX_CHARS = 200
+_CIO_DISCORD_BUY_THESIS_MAX_CHARS = 300
+_CIO_DISCORD_BUY_REASON_MAX_CHARS = 220
+_CIO_DISCORD_BUY_ACTION_MAX_CHARS = 180
 
 
 def _extract_cio_decisions(raw: Any) -> tuple[list[dict[str, Any]], str]:
@@ -309,8 +312,12 @@ def _format_buy_detail(row: dict[str, Any]) -> list[str]:
     if trade_bits:
         lines.append("- " + " | ".join(trade_bits))
 
-    thesis = _cap_discord_field(row.get("technical_thesis"), max_chars=160)
-    reason = _cap_discord_field(row.get("reason"), max_chars=140)
+    thesis = _cap_discord_field(
+        row.get("technical_thesis"), max_chars=_CIO_DISCORD_BUY_THESIS_MAX_CHARS
+    )
+    reason = _cap_discord_field(
+        row.get("reason"), max_chars=_CIO_DISCORD_BUY_REASON_MAX_CHARS
+    )
     if thesis:
         lines.append(f"- **Thesis:** {thesis}")
     if reason:
@@ -320,7 +327,9 @@ def _format_buy_detail(row: dict[str, Any]) -> list[str]:
     if inv:
         lines.append(f"- **Invalidate:** {inv}")
 
-    action = _cap_discord_field(row.get("action_required"), max_chars=120)
+    action = _cap_discord_field(
+        row.get("action_required"), max_chars=_CIO_DISCORD_BUY_ACTION_MAX_CHARS
+    )
     if action:
         lines.append(f"- **Action:** {action}")
 

@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from swingtrade.agents.cio import (
+    _CIO_DISCORD_BUY_THESIS_MAX_CHARS,
     _complete_cio_decisions_to_pool,
     _fallback_cio_discord_from_decisions,
     _filter_cio_decisions_to_pool,
@@ -171,6 +172,51 @@ def test_fallback_markdown_includes_buy_trade_details():
     assert "Target:" in md
 
 
+def test_fallback_markdown_buy_thesis_preserves_decision_ending():
+    """Long BUY thesis keeps decision tail below cap; ellipsis only beyond BUY thesis cap."""
+    ending = " DECISION: enter on reclaim of 20dma with volume confirmation."
+    filler = "M" * 200
+    thesis_within_cap = filler + ending
+    assert len(thesis_within_cap) <= _CIO_DISCORD_BUY_THESIS_MAX_CHARS
+
+    md = _fallback_cio_discord_from_decisions(
+        {
+            "decisions": [
+                {
+                    "ticker": "META",
+                    "decision": "BUY",
+                    "technical_thesis": thesis_within_cap,
+                    "reason": "Setup valid.",
+                }
+            ],
+        },
+        "pre_market",
+    )
+    assert "DECISION: enter on reclaim of 20dma with volume confirmation." in md
+    assert "- **Thesis:**" in md
+    thesis_line = next(line for line in md.splitlines() if line.startswith("- **Thesis:**"))
+    assert "..." not in thesis_line
+
+    over_cap = "M" * (_CIO_DISCORD_BUY_THESIS_MAX_CHARS + 40) + ending
+    md_trunc = _fallback_cio_discord_from_decisions(
+        {
+            "decisions": [
+                {
+                    "ticker": "META",
+                    "decision": "BUY",
+                    "technical_thesis": over_cap,
+                }
+            ],
+        },
+        "pre_market",
+    )
+    thesis_line_trunc = next(
+        line for line in md_trunc.splitlines() if line.startswith("- **Thesis:**")
+    )
+    assert thesis_line_trunc.endswith("...")
+    assert ending not in md_trunc
+
+
 def test_fallback_markdown_includes_watch_details():
     structured = {
         "decisions": [
@@ -312,6 +358,7 @@ if __name__ == "__main__":
         test_fallback_markdown_counts_reflect_completed_decisions,
         test_fallback_markdown_includes_market_context,
         test_fallback_markdown_includes_buy_trade_details,
+        test_fallback_markdown_buy_thesis_preserves_decision_ending,
         test_fallback_markdown_includes_watch_details,
         test_fallback_markdown_summarizes_pass_and_blocked,
         test_fallback_markdown_handles_sparse_system_fallback_watch,
