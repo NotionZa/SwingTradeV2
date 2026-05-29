@@ -30,6 +30,13 @@ from swingtrade.watchlist_store import load_watchlist_yaml
 
 logger = logging.getLogger(__name__)
 
+MARKET_NEWS_DISCORD_MAX_HEADLINES_PER_TICKER = 3
+
+_MARKET_NEWS_DIGEST_FOOTER = (
+    f"Showing up to {MARKET_NEWS_DISCORD_MAX_HEADLINES_PER_TICKER} headlines per ticker; "
+    "full raw headlines remain available in structured output."
+)
+
 
 def context_only_tickers(watchlist: dict[str, list[str]]) -> set[str]:
     ctx = set(watchlist.get("Context proxies", []))
@@ -72,25 +79,25 @@ def _validate_models_for_run(settings: Settings, client: Anthropic | None) -> No
 
 
 def format_news_digest(sentiment_structured: dict[str, Any]) -> str:
+    """Discord-only headline digest for #market-news (raw_bundle unchanged)."""
     raw = sentiment_structured.get("raw_bundle") or {}
     per = (raw.get("per_ticker") or {}) if isinstance(raw, dict) else {}
     lines = ["**Market news digest** (headlines only)"]
-    if not isinstance(per, dict):
-        return "\n".join(lines)
-    for sym, block in per.items():
-        if not isinstance(block, dict):
-            continue
-        news = block.get("news") or []
-        lines.append(f"`{sym}`")
-        if not news:
-            lines.append("- _(no headlines)_")
-            continue
-        for item in news[:4]:
-            if not isinstance(item, dict):
+    if isinstance(per, dict):
+        for sym, block in per.items():
+            if not isinstance(block, dict):
                 continue
-            title = item.get("headline") or item.get("title") or ""
-            src = item.get("source") or ""
-            lines.append(f"- {title} _({src})_")
+            news = block.get("news") or []
+            if not news:
+                continue
+            lines.append(f"`{sym}`")
+            for item in news[:MARKET_NEWS_DISCORD_MAX_HEADLINES_PER_TICKER]:
+                if not isinstance(item, dict):
+                    continue
+                title = item.get("headline") or item.get("title") or ""
+                src = item.get("source") or ""
+                lines.append(f"- {title} _({src})_")
+    lines.extend(["", _MARKET_NEWS_DIGEST_FOOTER])
     return "\n".join(lines)
 
 
