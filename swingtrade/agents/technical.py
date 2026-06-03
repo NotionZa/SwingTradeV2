@@ -15,6 +15,7 @@ from swingtrade.integrations.yfinance_data import (
 from swingtrade.models.agents import AgentResult, RunContext
 from swingtrade.prompt_loader import load_system_prompt
 from swingtrade.settings import Settings
+from swingtrade.trade_math import apply_trade_math_to_technical_structured
 
 logger = logging.getLogger(__name__)
 
@@ -837,6 +838,7 @@ def run_technical(
     if not isinstance(structured, dict):
         structured = {"scores": {}, "notes": ""}
     structured = _coerce_structured_tickers(structured)
+    structured = apply_trade_math_to_technical_structured(structured)
     structured = _apply_ta_score_caps(structured, ctx.session)
     raw = {**raw, "structured": structured}
 

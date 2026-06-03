@@ -169,6 +169,11 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Optional CSV output path (default: data/reviews/<stem>_review.csv)",
     )
+    p_review.add_argument(
+        "--all-runs",
+        action="store_true",
+        help="Export every JSONL row (all run_timestamp_utc values); default is latest run only",
+    )
 
     args = parser.parse_args(argv)
 
@@ -203,7 +208,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "review-candidates":
         try:
-            out = export_candidate_review_csv(args.file, output_path=args.output)
+            out = export_candidate_review_csv(
+                args.file,
+                output_path=args.output,
+                all_runs=bool(args.all_runs),
+            )
         except (FileNotFoundError, ValueError) as e:
             logger.error("%s", e)
             return 1

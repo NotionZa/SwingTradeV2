@@ -8,6 +8,7 @@ from typing import Any
 
 from swingtrade.candidate_ranker import rank_analysis_pool
 from swingtrade.models.agents import PipelineState, SessionName
+from swingtrade.trade_math import apply_trade_math_to_row
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,9 @@ _DECISION_FIELDS = (
     "ta_score",
     "sentiment_score",
     "risk_reward",
+    "model_risk_reward",
+    "math_valid",
+    "math_warning",
     "entry_zone",
     "stop_loss",
     "target",
@@ -45,6 +49,14 @@ _DECISION_FIELDS = (
 _SUMMARY_FIELDS = ("market_regime", "tech_bias", "overall_risk_level")
 
 _SCREENED_DECISION = "SCREENED"
+
+_TRADE_MATH_AUDIT_KEYS = (
+    "risk_reward",
+    "model_risk_reward",
+    "math_valid",
+    "math_warning",
+    "entry_ref",
+)
 
 
 def default_candidates_dir() -> Path:
@@ -165,6 +177,14 @@ def _apply_ta_sentiment_fields(
         rr = _as_float(row.get("risk_reward"))
         if rr is not None:
             record["risk_reward"] = rr
+        model_rr = _as_float(row.get("model_risk_reward"))
+        if model_rr is not None:
+            record["model_risk_reward"] = model_rr
+        if "math_valid" in row:
+            record["math_valid"] = bool(row["math_valid"])
+        warning = row.get("math_warning")
+        if isinstance(warning, str) and warning.strip():
+            record["math_warning"] = warning.strip()
         entry = row.get("suggested_entry_zone")
         if entry is not None:
             record["entry_zone"] = entry
@@ -197,6 +217,33 @@ def _apply_ta_sentiment_fields(
             record["sentiment_catalyst"] = catalyst.strip()
 
 
+def _finalize_candidate_trade_math(record: dict[str, Any]) -> dict[str, Any]:
+    """Ensure deterministic R/R and audit fields on every JSONL candidate row."""
+    enriched = apply_trade_math_to_row(record)
+    record["math_valid"] = bool(enriched.get("math_valid"))
+    for key in _TRADE_MATH_AUDIT_KEYS:
+        if key == "math_valid":
+            continue
+        if key in enriched:
+            record[key] = enriched[key]
+        elif key == "math_warning":
+            record.pop("math_warning", None)
+    return record
+
+
+def _merge_decision_into_record(
+    record: dict[str, Any], decision: dict[str, Any]
+) -> None:
+    for key in _DECISION_FIELDS:
+        if key not in decision:
+            continue
+        val = decision[key]
+        if key == "math_valid":
+            record[key] = bool(val)
+        elif val is not None:
+            record[key] = val
+
+
 def _build_cio_reviewed_record(
     decision: dict[str, Any],
     *,
@@ -218,11 +265,9 @@ def _build_cio_reviewed_record(
         analysis_rank=analysis_rank,
         summary=summary,
     )
-    for key in _DECISION_FIELDS:
-        if key in decision and decision[key] is not None:
-            record[key] = decision[key]
+    _merge_decision_into_record(record, decision)
     record["decision_raw"] = dict(decision)
-    return record
+    return _finalize_candidate_trade_math(record)
 
 
 def _build_screened_record(
@@ -255,7 +300,7 @@ def _build_screened_record(
     _apply_ta_sentiment_fields(
         record, _ta_row(ta, symbol), _sentiment_block(se, symbol)
     )
-    return record
+    return _finalize_candidate_trade_math(record)
 
 
 def _build_pipeline_records(

@@ -23,6 +23,9 @@ CSV_COLUMNS = (
     "ta_score",
     "sentiment_score",
     "risk_reward",
+    "model_risk_reward",
+    "math_valid",
+    "math_warning",
     "entry_zone",
     "stop_loss",
     "target",
@@ -62,6 +65,62 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
     return records
 
 
+def _run_timestamp_utc(record: dict[str, Any]) -> str:
+    ts = record.get("run_timestamp_utc")
+    if isinstance(ts, str) and ts.strip():
+        return ts.strip()
+    return ""
+
+
+def _normalize_ticker(record: dict[str, Any]) -> str:
+    ticker = record.get("ticker")
+    if isinstance(ticker, str) and ticker.strip():
+        return ticker.strip().upper()
+    return ""
+
+
+def latest_run_timestamp_utc(records: list[dict[str, Any]]) -> str | None:
+    """Return the newest run_timestamp_utc in *records* (ISO-8601 string compare)."""
+    stamps = [_run_timestamp_utc(r) for r in records]
+    stamps = [s for s in stamps if s]
+    if not stamps:
+        return None
+    return max(stamps)
+
+
+def dedupe_records_by_ticker_last(
+    records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Keep the last JSONL row per ticker (stable first-seen ticker order)."""
+    order: list[str] = []
+    by_ticker: dict[str, dict[str, Any]] = {}
+    for record in records:
+        sym = _normalize_ticker(record)
+        if not sym:
+            continue
+        if sym not in by_ticker:
+            order.append(sym)
+        by_ticker[sym] = record
+    return [by_ticker[sym] for sym in order]
+
+
+def select_records_for_review_export(
+    records: list[dict[str, Any]],
+    *,
+    all_runs: bool = False,
+) -> list[dict[str, Any]]:
+    """Default: latest run_timestamp_utc only, last row per ticker. --all-runs: full JSONL."""
+    if all_runs:
+        return list(records)
+
+    latest = latest_run_timestamp_utc(records)
+    if latest is None:
+        return dedupe_records_by_ticker_last(records)
+
+    latest_run = [r for r in records if _run_timestamp_utc(r) == latest]
+    return dedupe_records_by_ticker_last(latest_run)
+
+
 def _cell(value: Any) -> str:
     if value is None:
         return ""
@@ -81,15 +140,20 @@ def export_candidate_review_csv(
     *,
     output_path: Path | None = None,
     reviews_dir: Path | None = None,
+    all_runs: bool = False,
 ) -> Path:
     """Read a candidate JSONL file and write a review CSV. Returns the CSV path."""
     jsonl_path = jsonl_path.resolve()
     if not jsonl_path.is_file():
         raise FileNotFoundError(f"Candidate JSONL not found: {jsonl_path}")
 
-    records = _load_jsonl(jsonl_path)
-    if not records:
+    loaded = _load_jsonl(jsonl_path)
+    if not loaded:
         raise ValueError(f"No candidate records in {jsonl_path}")
+
+    records = select_records_for_review_export(loaded, all_runs=all_runs)
+    if not records:
+        raise ValueError(f"No candidate records to export from {jsonl_path}")
 
     csv_path = (output_path or review_csv_path_for_jsonl(jsonl_path, reviews_dir)).resolve()
     csv_path.parent.mkdir(parents=True, exist_ok=True)
@@ -100,9 +164,13 @@ def export_candidate_review_csv(
         for record in records:
             writer.writerow(_csv_row(record))
 
+    latest = latest_run_timestamp_utc(loaded)
     logger.info(
-        "Candidate review export wrote %s rows to %s",
+        "Candidate review export wrote %s rows to %s (loaded=%s, latest_run=%s, all_runs=%s)",
         len(records),
         csv_path,
+        len(loaded),
+        latest or "n/a",
+        all_runs,
     )
     return csv_path

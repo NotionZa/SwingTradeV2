@@ -14,6 +14,7 @@ from swingtrade.agents.cio import (
     _normalize_cio_structured,
     build_cio_risk_markdown,
 )
+from swingtrade.trade_math import apply_trade_math_to_cio_structured
 from swingtrade.models.agents import AgentResult
 
 
@@ -217,6 +218,30 @@ def test_fallback_markdown_buy_thesis_preserves_decision_ending():
     assert ending not in md_trunc
 
 
+def test_cio_trade_math_downgrades_klac_buy():
+    structured = apply_trade_math_to_cio_structured(
+        {
+            "decisions": [
+                {
+                    "ticker": "KLAC",
+                    "decision": "BUY",
+                    "direction": "Long",
+                    "entry_zone": "1910.00 - 1935.00",
+                    "stop_loss": 1810,
+                    "target": 2050,
+                    "risk_reward": 2.6,
+                }
+            ],
+            "summary": {"buy_count": 1, "watch_count": 0},
+        }
+    )
+    row = structured["decisions"][0]
+    assert row["decision"] == "WATCH"
+    assert abs(float(row["risk_reward"]) - 0.92) < 0.01
+    assert structured["summary"]["buy_count"] == 0
+    assert structured["summary"]["watch_count"] == 1
+
+
 def test_fallback_markdown_includes_watch_details():
     structured = {
         "decisions": [
@@ -359,6 +384,7 @@ if __name__ == "__main__":
         test_fallback_markdown_includes_market_context,
         test_fallback_markdown_includes_buy_trade_details,
         test_fallback_markdown_buy_thesis_preserves_decision_ending,
+        test_cio_trade_math_downgrades_klac_buy,
         test_fallback_markdown_includes_watch_details,
         test_fallback_markdown_summarizes_pass_and_blocked,
         test_fallback_markdown_handles_sparse_system_fallback_watch,

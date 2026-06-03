@@ -1,0 +1,197 @@
+from __future__ import annotations
+
+import csv
+import json
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from swingtrade.candidate_logger import _build_cio_reviewed_record
+from swingtrade.candidate_review import (
+    CSV_COLUMNS,
+    export_candidate_review_csv,
+    select_records_for_review_export,
+)
+
+
+def _write_jsonl(path: Path, rows: list[dict]) -> None:
+    with path.open("w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False))
+            f.write("\n")
+
+
+def test_latest_run_only_exports_newest_timestamp_group():
+    records = [
+        {"run_timestamp_utc": "2026-05-29T08:00:00Z", "ticker": "NVDA", "decision": "PASS"},
+        {"run_timestamp_utc": "2026-05-29T08:00:00Z", "ticker": "AMD", "decision": "PASS"},
+        {"run_timestamp_utc": "2026-05-29T12:00:00Z", "ticker": "NVDA", "decision": "WATCH"},
+        {"run_timestamp_utc": "2026-05-29T12:00:00Z", "ticker": "MSFT", "decision": "BUY"},
+    ]
+    selected = select_records_for_review_export(records)
+    assert len(selected) == 2
+    assert {r["ticker"] for r in selected} == {"NVDA", "MSFT"}
+    assert all(r["run_timestamp_utc"] == "2026-05-29T12:00:00Z" for r in selected)
+    nvda = next(r for r in selected if r["ticker"] == "NVDA")
+    assert nvda["decision"] == "WATCH"
+
+
+def test_stale_buy_ignored_when_latest_row_is_watch():
+    records = [
+        {
+            "run_timestamp_utc": "2026-05-29T08:00:00Z",
+            "ticker": "KLAC",
+            "decision": "BUY",
+        },
+        {
+            "run_timestamp_utc": "2026-05-29T12:00:00Z",
+            "ticker": "KLAC",
+            "decision": "WATCH",
+        },
+    ]
+    selected = select_records_for_review_export(records)
+    assert len(selected) == 1
+    assert selected[0]["decision"] == "WATCH"
+
+
+def test_export_count_matches_latest_run_group():
+    records = [
+        {"run_timestamp_utc": "2026-05-29T08:00:00Z", "ticker": f"T{i}"}
+        for i in range(10)
+    ] + [
+        {"run_timestamp_utc": "2026-05-29T12:00:00Z", "ticker": f"U{i}"}
+        for i in range(5)
+    ]
+    selected = select_records_for_review_export(records)
+    assert len(selected) == 5
+
+
+def test_single_run_behavior_unchanged():
+    records = [
+        {"run_timestamp_utc": "2026-05-29T12:00:00Z", "ticker": "NVDA", "decision": "BUY"},
+        {"run_timestamp_utc": "2026-05-29T12:00:00Z", "ticker": "AMD", "decision": "WATCH"},
+    ]
+    selected = select_records_for_review_export(records)
+    assert len(selected) == 2
+    assert selected[0]["ticker"] == "NVDA"
+    assert selected[1]["ticker"] == "AMD"
+
+
+def test_dedupe_keeps_last_row_within_latest_run():
+    records = [
+        {"run_timestamp_utc": "2026-05-29T12:00:00Z", "ticker": "KLAC", "decision": "BUY"},
+        {"run_timestamp_utc": "2026-05-29T12:00:00Z", "ticker": "KLAC", "decision": "WATCH"},
+    ]
+    selected = select_records_for_review_export(records)
+    assert len(selected) == 1
+    assert selected[0]["decision"] == "WATCH"
+
+
+def test_all_runs_exports_every_row():
+    records = [
+        {"run_timestamp_utc": "2026-05-29T08:00:00Z", "ticker": "KLAC", "decision": "BUY"},
+        {"run_timestamp_utc": "2026-05-29T12:00:00Z", "ticker": "KLAC", "decision": "WATCH"},
+    ]
+    selected = select_records_for_review_export(records, all_runs=True)
+    assert len(selected) == 2
+
+
+def test_export_csv_includes_trade_math_audit_columns(tmp_path: Path):
+    jsonl = tmp_path / "math_audit.jsonl"
+    _write_jsonl(
+        jsonl,
+        [
+            {
+                "run_timestamp_utc": "2026-05-29T12:00:00Z",
+                "ticker": "KLAC",
+                "decision": "WATCH",
+                "direction": "Long",
+                "entry_zone": "1910.00 - 1935.00",
+                "stop_loss": 1810,
+                "target": 2050,
+                "risk_reward": 0.92,
+                "model_risk_reward": 2.6,
+                "math_valid": True,
+                "math_warning": "Model R/R 2.60 vs calculated 0.92 (entry_ref=1935).",
+            },
+        ],
+    )
+    csv_path = export_candidate_review_csv(jsonl, output_path=tmp_path / "audit.csv")
+    with csv_path.open(encoding="utf-8") as f:
+        row = next(csv.DictReader(f))
+    assert "model_risk_reward" in CSV_COLUMNS
+    assert row["model_risk_reward"] == "2.6"
+    assert row["math_valid"] == "true"
+    assert "Model R/R" in row["math_warning"]
+    assert row["risk_reward"] == "0.92"
+
+
+def test_cio_record_finalize_populates_math_audit_fields():
+    record = _build_cio_reviewed_record(
+        {
+            "ticker": "NVDA",
+            "decision": "WATCH",
+            "direction": "Long",
+            "entry_zone": "2030.00 - 2055.00",
+            "stop_loss": 1950,
+            "target": 2200,
+            "risk_reward": 2.5,
+        },
+        session="pre_market",
+        run_timestamp_utc="2026-05-29T12:00:00Z",
+        date="2026-05-29",
+        summary={},
+        rank_score=0.8,
+        analysis_rank=1,
+    )
+    assert record["math_valid"] is True
+    assert record["model_risk_reward"] == 2.5
+    assert abs(float(record["risk_reward"]) - 1.38) < 0.05
+    assert "Model R/R" in str(record.get("math_warning", ""))
+
+
+def test_export_csv_writes_latest_run_only(tmp_path: Path):
+    jsonl = tmp_path / "candidates.jsonl"
+    _write_jsonl(
+        jsonl,
+        [
+            {"run_timestamp_utc": "2026-05-29T08:00:00Z", "ticker": "KLAC", "decision": "BUY"},
+            {"run_timestamp_utc": "2026-05-29T12:00:00Z", "ticker": "KLAC", "decision": "WATCH"},
+        ],
+    )
+    csv_path = export_candidate_review_csv(jsonl, output_path=tmp_path / "out.csv")
+    with csv_path.open(encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 1
+    assert rows[0]["ticker"] == "KLAC"
+    assert rows[0]["decision"] == "WATCH"
+    assert list(rows[0].keys()) == list(CSV_COLUMNS)
+
+
+if __name__ == "__main__":
+    tests = [
+        test_latest_run_only_exports_newest_timestamp_group,
+        test_stale_buy_ignored_when_latest_row_is_watch,
+        test_export_count_matches_latest_run_group,
+        test_single_run_behavior_unchanged,
+        test_dedupe_keeps_last_row_within_latest_run,
+        test_all_runs_exports_every_row,
+        test_export_csv_includes_trade_math_audit_columns,
+        test_cio_record_finalize_populates_math_audit_fields,
+        test_export_csv_writes_latest_run_only,
+    ]
+    failed = 0
+    for t in tests:
+        try:
+            if "tmp_path" in t.__code__.co_varnames:
+                with tempfile.TemporaryDirectory() as td:
+                    t(Path(td))
+            else:
+                t()
+            print(f"PASS {t.__name__}")
+        except Exception as e:
+            failed += 1
+            print(f"FAIL {t.__name__}: {e}")
+    raise SystemExit(1 if failed else 0)

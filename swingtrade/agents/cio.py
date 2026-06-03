@@ -15,6 +15,7 @@ from swingtrade.integrations.anthropic_client import complete_json_agent
 from swingtrade.models.agents import AgentResult, RunContext, PipelineState, SessionName
 from swingtrade.prompt_loader import load_system_prompt
 from swingtrade.settings import Settings
+from swingtrade.trade_math import apply_trade_math_to_cio_structured
 
 logger = logging.getLogger(__name__)
 
@@ -669,6 +670,7 @@ def run_cio(
     raw_decision_count = _count_cio_decisions(structured)
     structured = _filter_cio_decisions_to_pool(structured, cio_symbols)
     structured, missing = _complete_cio_decisions_to_pool(structured, cio_symbols)
+    structured = apply_trade_math_to_cio_structured(structured)
     if missing:
         logger.warning(
             "CIO completion added %s fallback decision(s) for missing tickers: %s",
