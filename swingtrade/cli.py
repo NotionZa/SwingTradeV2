@@ -9,7 +9,11 @@ from pathlib import Path
 from swingtrade.candidate_review import export_candidate_review_csv
 from swingtrade.opportunity_export import export_opportunity_csv
 from swingtrade.outcome_tracker import format_summary_text, run_outcome_backtest
-from swingtrade.backtest_summary import format_summary_console, run_backtest_summary
+from swingtrade.backtest_summary import (
+    format_summary_console,
+    filters_from_namespace,
+    run_backtest_summary,
+)
 from swingtrade.discord_bot import run_bot
 from swingtrade.logging_config import configure_logging
 from swingtrade.model_guard import check_models
@@ -251,6 +255,68 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="By-run summary CSV (default: data/backtests/summary_by_run.csv)",
     )
+    p_summary.add_argument(
+        "--since",
+        default=None,
+        help="Include signals on/after YYYY-MM-DD",
+    )
+    p_summary.add_argument(
+        "--until",
+        default=None,
+        help="Include signals on/before YYYY-MM-DD",
+    )
+    p_summary.add_argument(
+        "--session",
+        default=None,
+        help="Filter by session (e.g. pre_market, post_market)",
+    )
+    p_summary.add_argument(
+        "--decision",
+        default=None,
+        help="Filter by decision (BUY, WATCH, PASS, SCREENED)",
+    )
+    p_summary.add_argument(
+        "--review-level",
+        dest="review_level",
+        default=None,
+        help="Filter by review_level (cio_reviewed, rank_excluded, ...)",
+    )
+    p_summary.add_argument(
+        "--opportunity-status",
+        dest="opportunity_status",
+        default=None,
+        help="Filter by opportunity_status (PULLBACK_REQUIRED, NEAR_BUY, ...)",
+    )
+    p_summary.add_argument(
+        "--strategy",
+        default=None,
+        help="Filter by strategy (Momentum, Pullback, Breakout, ...)",
+    )
+    p_summary.add_argument(
+        "--only-valid-geometry",
+        action="store_true",
+        help="Keep rows with resolved/planned entry, stop, and target",
+    )
+    p_summary.add_argument(
+        "--only-planned",
+        action="store_true",
+        help="Keep rows with planned_entry_price",
+    )
+    p_summary.add_argument(
+        "--only-conditional",
+        action="store_true",
+        help="Keep rows with conditional_buy_limit=true",
+    )
+    p_summary.add_argument(
+        "--only-closed",
+        action="store_true",
+        help="Keep WIN/LOSS outcomes only",
+    )
+    p_summary.add_argument(
+        "--exclude-legacy",
+        action="store_true",
+        help="Drop rows lacking run_id and planned/opportunity tracking",
+    )
 
     p_univ = sub.add_parser(
         "universe-status",
@@ -345,18 +411,30 @@ def main(argv: list[str] | None = None) -> int:
         print(format_summary_text(summary, extras))
         return 0
     if args.command == "summarize-backtests":
+        summary_filters = filters_from_namespace(args)
         try:
-            out_summary, out_by_run, overall, by_run, loaded = run_backtest_summary(
-                args.input,
-                output_path=args.output,
-                by_run_output_path=args.by_run_output,
+            out_summary, out_by_run, overall, by_run, raw_loaded, filtered = (
+                run_backtest_summary(
+                    args.input,
+                    output_path=args.output,
+                    by_run_output_path=args.by_run_output,
+                    filters=summary_filters,
+                )
             )
         except (FileNotFoundError, ValueError) as e:
             logger.error("%s", e)
             return 1
         print(out_summary)
         print(out_by_run)
-        print(format_summary_console(overall, by_run, loaded_rows=loaded))
+        print(
+            format_summary_console(
+                overall,
+                by_run,
+                raw_loaded=raw_loaded,
+                filtered_rows=filtered,
+                filters=summary_filters,
+            )
+        )
         return 0
     if args.command == "universe-status":
         get_settings.cache_clear()  # type: ignore[attr-defined]
