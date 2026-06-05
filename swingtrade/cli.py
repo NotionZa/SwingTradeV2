@@ -8,6 +8,7 @@ from pathlib import Path
 
 from swingtrade.candidate_review import export_candidate_review_csv
 from swingtrade.opportunity_export import export_opportunity_csv
+from swingtrade.outcome_tracker import format_summary_text, run_outcome_backtest
 from swingtrade.discord_bot import run_bot
 from swingtrade.logging_config import configure_logging
 from swingtrade.model_guard import check_models
@@ -204,6 +205,29 @@ def main(argv: list[str] | None = None) -> int:
         help="Include NO_ACTIONABLE_ZONE rows (excluded by default)",
     )
 
+    p_backtest = sub.add_parser(
+        "backtest-outcomes",
+        help="Replay historical outcomes for opportunity/review CSV signals",
+    )
+    p_backtest.add_argument(
+        "--file",
+        type=Path,
+        required=True,
+        help="Path to opportunity or review CSV, e.g. data/opportunities/2026-06-05_pre_market_opportunities.csv",
+    )
+    p_backtest.add_argument(
+        "--days",
+        type=int,
+        default=10,
+        help="Trading-day horizon after signal date (default 10)",
+    )
+    p_backtest.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional output CSV path (default: data/backtests/<stem>_outcomes.csv)",
+    )
+
     p_univ = sub.add_parser(
         "universe-status",
         help="Print universe pool sizes, sources, and truncation diagnostics",
@@ -282,6 +306,19 @@ def main(argv: list[str] | None = None) -> int:
             logger.error("%s", e)
             return 1
         print(out)
+        return 0
+    if args.command == "backtest-outcomes":
+        try:
+            out_path, _rows, summary, extras = run_outcome_backtest(
+                args.file,
+                horizon_days=int(args.days),
+                output_path=args.output,
+            )
+        except (FileNotFoundError, ValueError) as e:
+            logger.error("%s", e)
+            return 1
+        print(out_path)
+        print(format_summary_text(summary, extras))
         return 0
     if args.command == "universe-status":
         get_settings.cache_clear()  # type: ignore[attr-defined]
