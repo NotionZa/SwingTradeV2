@@ -247,7 +247,7 @@ def test_fallback_markdown_watch_preserves_priority_fields_with_long_case():
     )
     md = _fallback_cio_discord_from_decisions(structured, "pre_market")
     assert "**Opportunity:**" in md
-    assert "Pullback <=" in md
+    assert "Conditional limit <=" in md or "Pullback <=" in md
     assert "**Trigger:**" in md
     assert "Upgrade on reclaim above 20dma" in md
     assert "**Invalidate:**" in md
@@ -277,7 +277,7 @@ def test_fallback_markdown_pass_preserves_opportunity_line():
     )
     md = _fallback_cio_discord_from_decisions(structured, "pre_market")
     assert "**Opportunity:**" in md
-    assert "Pullback <=" in md
+    assert "Conditional limit <=" in md or "Pullback <=" in md
     assert "**Case:**" in md
 
 
@@ -299,7 +299,7 @@ def test_fallback_markdown_includes_opportunity_for_watch():
     )
     md = _fallback_cio_discord_from_decisions(structured, "pre_market")
     assert "**Opportunity:**" in md
-    assert "Pullback <=" in md
+    assert "Conditional limit <=" in md or "Pullback <=" in md
 
 
 def test_cio_trade_math_downgrades_klac_buy():

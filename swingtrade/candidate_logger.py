@@ -51,6 +51,18 @@ _DECISION_FIELDS = (
     "rr_gap",
     "entry_improvement_needed",
     "opportunity_note",
+    "zone_low",
+    "zone_mid",
+    "zone_high",
+    "rr_at_zone_low",
+    "rr_at_zone_mid",
+    "rr_at_zone_high",
+    "planned_entry_price",
+    "planned_entry_rr",
+    "conditional_buy_limit",
+    "qty_for_1000_notional",
+    "risk_per_share_at_planned_entry",
+    "reward_per_share_at_planned_entry",
 )
 
 _SUMMARY_FIELDS = ("market_regime", "tech_bias", "overall_risk_level")

@@ -301,6 +301,35 @@ def test_cio_record_finalize_populates_opportunity_fields():
     assert record.get("current_rr") is not None
 
 
+def test_export_csv_includes_planned_entry_fields(tmp_path: Path):
+    jsonl = tmp_path / "planned.jsonl"
+    _write_jsonl(
+        jsonl,
+        [
+            {
+                "run_timestamp_utc": "2026-06-05T12:00:00Z",
+                "ticker": "KLAC",
+                "decision": "WATCH",
+                "direction": "Long",
+                "entry_zone": "2100.00 - 2135.00",
+                "stop_loss": 2050,
+                "target": 2280,
+            },
+        ],
+    )
+    csv_path = export_candidate_review_csv(jsonl, output_path=tmp_path / "planned.csv")
+    with csv_path.open(encoding="utf-8") as f:
+        row = next(csv.DictReader(f))
+    assert "planned_entry_price" in CSV_COLUMNS
+    assert row["zone_low"] == "2100.0"
+    assert row["zone_mid"] == "2117.5"
+    assert row["zone_high"] == "2135.0"
+    assert row["conditional_buy_limit"] == "true"
+    assert row["planned_entry_price"]
+    assert row["planned_entry_rr"] == "2.5"
+    assert row["qty_for_1000_notional"]
+
+
 def test_export_csv_writes_latest_run_only(tmp_path: Path):
     jsonl = tmp_path / "candidates.jsonl"
     _write_jsonl(
@@ -334,6 +363,7 @@ if __name__ == "__main__":
         test_review_export_invalid_geometry_backfills_no_actionable_zone,
         test_enrich_records_for_review_export_preserves_latest_run_selection,
         test_export_csv_includes_opportunity_fields,
+        test_export_csv_includes_planned_entry_fields,
         test_cio_record_finalize_populates_opportunity_fields,
         test_export_csv_writes_latest_run_only,
     ]

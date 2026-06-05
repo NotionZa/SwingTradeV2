@@ -180,6 +180,31 @@ def test_csv_contains_all_expected_columns(tmp_path: Path):
         assert list(reader.fieldnames) == list(OPPORTUNITY_CSV_COLUMNS)
 
 
+def test_opportunity_csv_includes_planned_entry_fields(tmp_path: Path):
+    jsonl = tmp_path / "planned.jsonl"
+    _write_jsonl(
+        jsonl,
+        [
+            {
+                "run_timestamp_utc": "2026-06-05T12:00:00Z",
+                "ticker": "KLAC",
+                "decision": "WATCH",
+                "direction": "Long",
+                "entry_zone": "2100.00 - 2135.00",
+                "stop_loss": 2050,
+                "target": 2280,
+            },
+        ],
+    )
+    csv_path = export_opportunity_csv(jsonl, output_path=tmp_path / "planned.csv")
+    with csv_path.open(encoding="utf-8") as f:
+        row = next(csv.DictReader(f))
+    assert "planned_entry_price" in OPPORTUNITY_CSV_COLUMNS
+    assert row["conditional_buy_limit"] == "true"
+    assert row["zone_mid"] == "2117.5"
+    assert row["planned_entry_rr"] == "2.5"
+
+
 def test_review_candidates_unchanged(tmp_path: Path):
     jsonl = tmp_path / "review.jsonl"
     _write_jsonl(
@@ -213,6 +238,7 @@ if __name__ == "__main__":
         test_include_no_zone_flag,
         test_sort_near_buy_before_pullback,
         test_csv_contains_all_expected_columns,
+        test_opportunity_csv_includes_planned_entry_fields,
         test_review_candidates_unchanged,
     ]
     failed = 0

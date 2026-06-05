@@ -23,6 +23,21 @@ _OPPORTUNITY_FIELD_KEYS = (
     "opportunity_note",
 )
 
+_PLANNED_ENTRY_FIELD_KEYS = (
+    "zone_low",
+    "zone_mid",
+    "zone_high",
+    "rr_at_zone_low",
+    "rr_at_zone_mid",
+    "rr_at_zone_high",
+    "planned_entry_price",
+    "planned_entry_rr",
+    "conditional_buy_limit",
+    "qty_for_1000_notional",
+    "risk_per_share_at_planned_entry",
+    "reward_per_share_at_planned_entry",
+)
+
 _NUM_RE = re.compile(r"[\d,]+\.?\d*")
 
 
@@ -52,6 +67,18 @@ def _parse_numbers(text: str) -> list[float]:
         except ValueError:
             continue
     return nums
+
+
+def parse_entry_zone_zones(entry: Any) -> dict[str, float | None]:
+    """Return zone_low, zone_mid, zone_high for an entry zone."""
+    low, high = parse_entry_zone(entry)
+    if low is None or high is None:
+        return {"zone_low": None, "zone_mid": None, "zone_high": None}
+    return {
+        "zone_low": low,
+        "zone_high": high,
+        "zone_mid": round((low + high) / 2, 2),
+    }
 
 
 def parse_entry_zone(entry: Any) -> tuple[float | None, float | None]:
@@ -155,6 +182,24 @@ def calculate_long_trade_math(
     return out
 
 
+def calculate_long_rr_at_entry(
+    entry_price: Any,
+    stop_loss: Any,
+    target: Any,
+) -> float | None:
+    """Long R/R at a specific entry: (target - entry) / (entry - stop)."""
+    entry = _as_float(entry_price)
+    stop = _as_float(stop_loss)
+    tgt = _as_float(target)
+    if entry is None or stop is None or tgt is None:
+        return None
+    risk = entry - stop
+    reward = tgt - entry
+    if risk <= 0 or reward <= 0:
+        return None
+    return round(reward / risk, 4)
+
+
 def max_valid_long_entry(
     stop_loss: float,
     target: float,
@@ -253,6 +298,114 @@ def _clear_opportunity_fields(row: dict[str, Any]) -> None:
         row.pop(key, None)
 
 
+def _clear_planned_entry_fields(row: dict[str, Any]) -> None:
+    for key in _PLANNED_ENTRY_FIELD_KEYS:
+        row.pop(key, None)
+
+
+def calculate_planned_entry_fields(
+    *,
+    entry_zone: Any,
+    stop_loss: Any,
+    target: Any,
+    direction: Any = "Long",
+    math_valid: bool,
+    entry_ref: Any = None,
+    current_rr: Any = None,
+    required_rr: float = MIN_BUY_RISK_REWARD,
+    valid_entry_max: Any = None,
+) -> dict[str, Any]:
+    """Execution guidance: planned limit entry without changing BUY/WATCH decisions."""
+    out: dict[str, Any] = {key: None for key in _PLANNED_ENTRY_FIELD_KEYS}
+    out["conditional_buy_limit"] = False
+
+    if not math_valid or not _is_long_direction(direction):
+        return out
+
+    stop = _as_float(stop_loss)
+    tgt = _as_float(target)
+    if stop is None or tgt is None:
+        return out
+
+    zones = parse_entry_zone_zones(entry_zone)
+    zone_low = zones.get("zone_low")
+    zone_mid = zones.get("zone_mid")
+    zone_high = zones.get("zone_high")
+    if zone_low is not None:
+        out["zone_low"] = zone_low
+    if zone_mid is not None:
+        out["zone_mid"] = zone_mid
+    if zone_high is not None:
+        out["zone_high"] = zone_high
+
+    rr_low = calculate_long_rr_at_entry(zone_low, stop, tgt)
+    rr_mid = calculate_long_rr_at_entry(zone_mid, stop, tgt)
+    rr_high = calculate_long_rr_at_entry(zone_high, stop, tgt)
+    if rr_low is not None:
+        out["rr_at_zone_low"] = round(rr_low, 2)
+    if rr_mid is not None:
+        out["rr_at_zone_mid"] = round(rr_mid, 2)
+    if rr_high is not None:
+        out["rr_at_zone_high"] = round(rr_high, 2)
+
+    rr = _as_float(current_rr)
+    ref = _as_float(entry_ref)
+    vmax = _as_float(valid_entry_max)
+    required = float(required_rr)
+
+    if rr is not None and rr >= required and ref is not None:
+        out["planned_entry_price"] = ref
+        out["planned_entry_rr"] = round(rr, 2)
+        out["conditional_buy_limit"] = False
+    elif vmax is not None and vmax > stop:
+        out["planned_entry_price"] = vmax
+        out["planned_entry_rr"] = required
+        out["conditional_buy_limit"] = True
+    elif rr_mid is not None and rr_mid >= required and zone_mid is not None:
+        out["planned_entry_price"] = zone_mid
+        out["planned_entry_rr"] = round(rr_mid, 2)
+        out["conditional_buy_limit"] = True
+    else:
+        return out
+
+    planned = _as_float(out.get("planned_entry_price"))
+    if planned is not None and planned > stop and tgt > planned:
+        out["qty_for_1000_notional"] = round(1000 / planned, 2)
+        out["risk_per_share_at_planned_entry"] = round(planned - stop, 2)
+        out["reward_per_share_at_planned_entry"] = round(tgt - planned, 2)
+
+    return out
+
+
+def apply_planned_entry_to_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Add planned-entry / conditional-limit execution fields after opportunity zone."""
+    out = dict(row)
+    entry, stop, target = _resolve_trade_levels(out)
+    required = _as_float(out.get("required_rr")) or MIN_BUY_RISK_REWARD
+
+    planned = calculate_planned_entry_fields(
+        entry_zone=entry,
+        stop_loss=stop,
+        target=target,
+        direction=out.get("direction"),
+        math_valid=bool(out.get("math_valid")),
+        entry_ref=out.get("entry_ref"),
+        current_rr=out.get("current_rr") if out.get("current_rr") is not None else out.get("risk_reward"),
+        required_rr=required,
+        valid_entry_max=out.get("valid_entry_max"),
+    )
+
+    _clear_planned_entry_fields(out)
+    for key in _PLANNED_ENTRY_FIELD_KEYS:
+        if key == "conditional_buy_limit":
+            out[key] = bool(planned.get(key))
+            continue
+        val = planned.get(key)
+        if val is not None:
+            out[key] = val
+    return out
+
+
 def apply_opportunity_zone_to_row(row: dict[str, Any]) -> dict[str, Any]:
     """Add opportunity-zone fields after trade math."""
     out = dict(row)
@@ -333,7 +486,7 @@ def apply_trade_math_to_row(row: dict[str, Any]) -> dict[str, Any]:
         # Do not trust model R/R when levels are invalid.
         out.pop("risk_reward", None)
 
-    return apply_opportunity_zone_to_row(out)
+    return apply_planned_entry_to_row(apply_opportunity_zone_to_row(out))
 
 
 CANDIDATE_TRADE_ENRICHMENT_KEYS = (
@@ -349,6 +502,18 @@ CANDIDATE_TRADE_ENRICHMENT_KEYS = (
     "rr_gap",
     "entry_improvement_needed",
     "opportunity_note",
+    "zone_low",
+    "zone_mid",
+    "zone_high",
+    "rr_at_zone_low",
+    "rr_at_zone_mid",
+    "rr_at_zone_high",
+    "planned_entry_price",
+    "planned_entry_rr",
+    "conditional_buy_limit",
+    "qty_for_1000_notional",
+    "risk_per_share_at_planned_entry",
+    "reward_per_share_at_planned_entry",
 )
 
 

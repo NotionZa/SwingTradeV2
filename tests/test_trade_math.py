@@ -11,11 +11,13 @@ from swingtrade.trade_math import (
     OPPORTUNITY_NO_ZONE,
     OPPORTUNITY_PULLBACK_REQUIRED,
     apply_trade_math_to_row,
+    calculate_long_rr_at_entry,
     calculate_long_trade_math,
     calculate_opportunity_zone,
     gate_buy_decision,
     long_entry_ref,
     max_valid_long_entry,
+    parse_entry_zone_zones,
 )
 
 
@@ -158,6 +160,99 @@ def test_invalid_levels_no_actionable_zone():
     assert row["opportunity_status"] == OPPORTUNITY_NO_ZONE
 
 
+def test_parse_entry_zone_zones_midpoint():
+    zones = parse_entry_zone_zones("2100.00 - 2135.00")
+    assert zones["zone_low"] == 2100.0
+    assert zones["zone_high"] == 2135.0
+    assert zones["zone_mid"] == 2117.5
+
+
+def test_rr_at_zone_low_mid_high():
+    row = apply_trade_math_to_row(
+        {
+            "direction": "Long",
+            "entry_zone": "2100.00 - 2135.00",
+            "stop_loss": 2050,
+            "target": 2280,
+        }
+    )
+    assert row["rr_at_zone_low"] == 3.6
+    assert abs(float(row["rr_at_zone_mid"]) - 2.41) < 0.02
+    assert abs(float(row["rr_at_zone_high"]) - 1.71) < 0.02
+
+
+def test_planned_entry_uses_valid_entry_max_for_pullback():
+    row = apply_trade_math_to_row(
+        {
+            "direction": "Long",
+            "entry_zone": "2100.00 - 2135.00",
+            "stop_loss": 2050,
+            "target": 2280,
+            "decision": "WATCH",
+        }
+    )
+    assert row["opportunity_status"] == OPPORTUNITY_PULLBACK_REQUIRED
+    assert row["conditional_buy_limit"] is True
+    assert abs(float(row["planned_entry_price"]) - float(row["valid_entry_max"])) < 0.01
+    assert float(row["planned_entry_rr"]) == MIN_BUY_RISK_REWARD
+    assert row["decision"] == "WATCH"
+    assert float(row["qty_for_1000_notional"]) == round(
+        1000 / float(row["planned_entry_price"]), 2
+    )
+    assert float(row["risk_per_share_at_planned_entry"]) == round(
+        float(row["planned_entry_price"]) - 2050, 2
+    )
+    assert float(row["reward_per_share_at_planned_entry"]) == round(
+        2280 - float(row["planned_entry_price"]), 2
+    )
+
+
+def test_planned_entry_does_not_upgrade_buy_decision():
+    row = gate_buy_decision(
+        {
+            "decision": "BUY",
+            "direction": "Long",
+            "entry_zone": "2100.00 - 2135.00",
+            "stop_loss": 2050,
+            "target": 2280,
+            "risk_reward": 3.0,
+        }
+    )
+    assert row["decision"] == "WATCH"
+    assert row.get("conditional_buy_limit") is True
+
+
+def test_invalid_geometry_skips_planned_entry_fields():
+    row = apply_trade_math_to_row(
+        {
+            "direction": "Long",
+            "entry_zone": "100-102",
+            "stop_loss": 105,
+            "target": 120,
+        }
+    )
+    assert row.get("planned_entry_price") is None
+    assert row.get("conditional_buy_limit") is False
+    assert row.get("zone_low") is None
+
+
+def test_non_long_skips_planned_entry_fields():
+    row = apply_trade_math_to_row(
+        {
+            "direction": "Short",
+            "entry_zone": "100-102",
+            "stop_loss": 95,
+            "target": 80,
+        }
+    )
+    assert row.get("planned_entry_price") is None
+    assert row.get("conditional_buy_limit") is False
+
+
+def test_calculate_long_rr_at_entry_formula():
+    assert calculate_long_rr_at_entry(2117.5, 2050, 2280) == 2.4074
+
+
 def test_model_rr_overridden_when_calculated_differs():
     row = apply_trade_math_to_row(
         {
@@ -185,6 +280,13 @@ if __name__ == "__main__":
         test_near_buy_opportunity_classification,
         test_invalid_levels_no_actionable_zone,
         test_model_rr_overridden_when_calculated_differs,
+        test_parse_entry_zone_zones_midpoint,
+        test_rr_at_zone_low_mid_high,
+        test_planned_entry_uses_valid_entry_max_for_pullback,
+        test_planned_entry_does_not_upgrade_buy_decision,
+        test_invalid_geometry_skips_planned_entry_fields,
+        test_non_long_skips_planned_entry_fields,
+        test_calculate_long_rr_at_entry_formula,
     ]
     failed = 0
     for t in tests:

@@ -330,6 +330,11 @@ def _format_opportunity_discord_line(row: dict[str, Any]) -> str | None:
     if status in ("", "BUY_NOW", "NO_ACTIONABLE_ZONE"):
         return None
     required = row.get("required_rr", 2.5)
+    if row.get("conditional_buy_limit") and row.get("planned_entry_price") is not None:
+        price = row.get("planned_entry_price")
+        return (
+            f"- **Opportunity:** Conditional limit <= {price} for {required} R/R"
+        )
     if status == "PULLBACK_REQUIRED":
         vmax = row.get("valid_entry_max")
         if vmax is not None:
