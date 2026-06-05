@@ -8,7 +8,7 @@ from typing import Any
 
 from swingtrade.candidate_ranker import rank_analysis_pool
 from swingtrade.models.agents import PipelineState, SessionName
-from swingtrade.trade_math import apply_trade_math_to_row
+from swingtrade.trade_math import enrich_candidate_trade_fields
 
 logger = logging.getLogger(__name__)
 
@@ -44,20 +44,18 @@ _DECISION_FIELDS = (
     "invalidation_conditions",
     "action_required",
     "revisit_condition",
+    "opportunity_status",
+    "required_rr",
+    "valid_entry_max",
+    "current_rr",
+    "rr_gap",
+    "entry_improvement_needed",
+    "opportunity_note",
 )
 
 _SUMMARY_FIELDS = ("market_regime", "tech_bias", "overall_risk_level")
 
 _SCREENED_DECISION = "SCREENED"
-
-_TRADE_MATH_AUDIT_KEYS = (
-    "risk_reward",
-    "model_risk_reward",
-    "math_valid",
-    "math_warning",
-    "entry_ref",
-)
-
 
 def default_candidates_dir() -> Path:
     return Path.cwd().resolve() / "data" / "candidates"
@@ -219,16 +217,7 @@ def _apply_ta_sentiment_fields(
 
 def _finalize_candidate_trade_math(record: dict[str, Any]) -> dict[str, Any]:
     """Ensure deterministic R/R and audit fields on every JSONL candidate row."""
-    enriched = apply_trade_math_to_row(record)
-    record["math_valid"] = bool(enriched.get("math_valid"))
-    for key in _TRADE_MATH_AUDIT_KEYS:
-        if key == "math_valid":
-            continue
-        if key in enriched:
-            record[key] = enriched[key]
-        elif key == "math_warning":
-            record.pop("math_warning", None)
-    return record
+    return enrich_candidate_trade_fields(record)
 
 
 def _merge_decision_into_record(

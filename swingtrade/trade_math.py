@@ -4,7 +4,24 @@ import re
 from typing import Any
 
 MIN_BUY_RISK_REWARD = 2.5
+NEAR_BUY_RR_LOWER = 2.2
 MATH_MISMATCH_WARN_DELTA = 0.2
+
+OPPORTUNITY_BUY_NOW = "BUY_NOW"
+OPPORTUNITY_NEAR_BUY = "NEAR_BUY"
+OPPORTUNITY_PULLBACK_REQUIRED = "PULLBACK_REQUIRED"
+OPPORTUNITY_TARGET_EXTENSION = "TARGET_EXTENSION_REQUIRED"
+OPPORTUNITY_NO_ZONE = "NO_ACTIONABLE_ZONE"
+
+_OPPORTUNITY_FIELD_KEYS = (
+    "opportunity_status",
+    "required_rr",
+    "valid_entry_max",
+    "current_rr",
+    "rr_gap",
+    "entry_improvement_needed",
+    "opportunity_note",
+)
 
 _NUM_RE = re.compile(r"[\d,]+\.?\d*")
 
@@ -138,6 +155,128 @@ def calculate_long_trade_math(
     return out
 
 
+def max_valid_long_entry(
+    stop_loss: float,
+    target: float,
+    *,
+    required_rr: float = MIN_BUY_RISK_REWARD,
+) -> float | None:
+    """Maximum long entry price that still achieves *required_rr* with fixed stop/target."""
+    if target <= stop_loss:
+        return None
+    return round((target + required_rr * stop_loss) / (required_rr + 1), 2)
+
+
+def calculate_opportunity_zone(
+    *,
+    entry_zone: Any,
+    stop_loss: Any,
+    target: Any,
+    direction: Any = "Long",
+    math_valid: bool,
+    current_rr: Any = None,
+    required_rr: float = MIN_BUY_RISK_REWARD,
+) -> dict[str, Any]:
+    """Classify actionable long opportunity from validated trade levels."""
+    out: dict[str, Any] = {
+        "opportunity_status": OPPORTUNITY_NO_ZONE,
+        "required_rr": required_rr,
+        "valid_entry_max": None,
+        "current_rr": None,
+        "rr_gap": None,
+        "entry_improvement_needed": None,
+        "opportunity_note": "No actionable long zone from current stop/target geometry.",
+    }
+
+    if not math_valid or not _is_long_direction(direction):
+        return out
+
+    stop = _as_float(stop_loss)
+    tgt = _as_float(target)
+    entry_ref = long_entry_ref(entry_zone, direction=direction)
+    rr = _as_float(current_rr)
+
+    if stop is None or tgt is None or entry_ref is None:
+        out["opportunity_note"] = "No actionable long zone from current stop/target geometry."
+        return out
+
+    max_entry = max_valid_long_entry(stop, tgt, required_rr=required_rr)
+    out["valid_entry_max"] = max_entry
+
+    if rr is not None:
+        out["current_rr"] = round(rr, 2)
+        if rr < required_rr:
+            out["rr_gap"] = round(required_rr - rr, 2)
+
+    if rr is not None and rr >= required_rr:
+        out["opportunity_status"] = OPPORTUNITY_BUY_NOW
+        out["opportunity_note"] = (
+            f"Current R/R {rr:.2f} meets the {required_rr:g} threshold at entry_ref {entry_ref:g}."
+        )
+        out["rr_gap"] = 0.0
+        return out
+
+    if rr is not None and NEAR_BUY_RR_LOWER <= rr < required_rr:
+        out["opportunity_status"] = OPPORTUNITY_NEAR_BUY
+        out["opportunity_note"] = (
+            f"Current R/R {rr:.2f} is near threshold; small pullback may qualify."
+        )
+        if max_entry is not None and max_entry < entry_ref:
+            out["entry_improvement_needed"] = round(entry_ref - max_entry, 2)
+        return out
+
+    if max_entry is None or max_entry <= stop:
+        out["opportunity_status"] = OPPORTUNITY_TARGET_EXTENSION
+        out["opportunity_note"] = (
+            f"Target {tgt:g} is too close to stop {stop:g}; raise target to improve R/R."
+        )
+        return out
+
+    if max_entry < entry_ref:
+        out["opportunity_status"] = OPPORTUNITY_PULLBACK_REQUIRED
+        out["entry_improvement_needed"] = round(entry_ref - max_entry, 2)
+        out["opportunity_note"] = (
+            f"Needs entry <= {max_entry:.2f} to reach R/R {required_rr:g} "
+            f"using stop {stop:g} and target {tgt:g}."
+        )
+        return out
+
+    out["opportunity_status"] = OPPORTUNITY_TARGET_EXTENSION
+    out["opportunity_note"] = (
+        f"Cannot reach R/R {required_rr:g} via pullback alone; target extension may be required."
+    )
+    return out
+
+
+def _clear_opportunity_fields(row: dict[str, Any]) -> None:
+    for key in _OPPORTUNITY_FIELD_KEYS:
+        row.pop(key, None)
+
+
+def apply_opportunity_zone_to_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Add opportunity-zone fields after trade math."""
+    out = dict(row)
+    entry, stop, target = _resolve_trade_levels(out)
+    math_valid = bool(out.get("math_valid"))
+    current_rr = _as_float(out.get("risk_reward"))
+
+    zone = calculate_opportunity_zone(
+        entry_zone=entry,
+        stop_loss=stop,
+        target=target,
+        direction=out.get("direction"),
+        math_valid=math_valid,
+        current_rr=current_rr,
+    )
+
+    _clear_opportunity_fields(out)
+    for key in _OPPORTUNITY_FIELD_KEYS:
+        val = zone.get(key)
+        if val is not None:
+            out[key] = val
+    return out
+
+
 def _resolve_trade_levels(row: dict[str, Any]) -> tuple[Any, Any, Any]:
     entry = row.get("entry_zone")
     if entry is None:
@@ -194,6 +333,37 @@ def apply_trade_math_to_row(row: dict[str, Any]) -> dict[str, Any]:
         # Do not trust model R/R when levels are invalid.
         out.pop("risk_reward", None)
 
+    return apply_opportunity_zone_to_row(out)
+
+
+CANDIDATE_TRADE_ENRICHMENT_KEYS = (
+    "risk_reward",
+    "model_risk_reward",
+    "math_valid",
+    "math_warning",
+    "entry_ref",
+    "opportunity_status",
+    "required_rr",
+    "valid_entry_max",
+    "current_rr",
+    "rr_gap",
+    "entry_improvement_needed",
+    "opportunity_note",
+)
+
+
+def enrich_candidate_trade_fields(record: dict[str, Any]) -> dict[str, Any]:
+    """Merge deterministic trade math + opportunity fields onto a candidate row."""
+    out = dict(record)
+    enriched = apply_trade_math_to_row(out)
+    out["math_valid"] = bool(enriched.get("math_valid"))
+    for key in CANDIDATE_TRADE_ENRICHMENT_KEYS:
+        if key == "math_valid":
+            continue
+        if key in enriched:
+            out[key] = enriched[key]
+        elif key == "math_warning":
+            out.pop("math_warning", None)
     return out
 
 

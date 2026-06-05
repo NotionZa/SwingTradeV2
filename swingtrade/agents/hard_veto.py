@@ -14,6 +14,58 @@ logger = logging.getLogger(__name__)
 
 # Playbook: long-only liquid names; hard numeric gates here, narrative optional.
 
+_HARD_VETO_ZERO_KILLED_FOOTER = (
+    "_No hard-veto exclusions this run. All watchlist names remain eligible "
+    "for downstream review._"
+)
+
+
+def format_hard_veto_discord(
+    rows: list[dict[str, Any]],
+    *,
+    killed_watchlist: list[str],
+) -> str:
+    """Build Hard Veto Discord markdown with an explicit footer."""
+    killed_syms = [r["symbol"] for r in rows if r.get("killed")]
+    survivors = [r["symbol"] for r in rows if not r.get("killed")]
+    lines = [
+        "**Hard Veto scan**",
+        f"Candidates: {len(rows)} | Killed: {len(killed_syms)} | "
+        f"Downstream (TA / Sentiment / CIO): {len(survivors)}",
+    ]
+    for r in rows:
+        status = "KILL" if r.get("killed") else "OK"
+        wl = " (watchlist)" if r.get("on_watchlist") else ""
+        reasons = r.get("reasons") or []
+        reason_text = ", ".join(reasons) if isinstance(reasons, list) else str(reasons)
+        lines.append(
+            f"- `{r['symbol']}` **{status}**{wl} — {reason_text or 'rules clear'}"
+        )
+
+    lines.append("")
+    if not killed_syms:
+        lines.append(_HARD_VETO_ZERO_KILLED_FOOTER)
+    elif killed_watchlist:
+        lines.append(
+            "_Watchlist names that **failed** veto are **not** sent to TA / Sentiment / "
+            "CIO this run. They **remain** in `watchlist.yaml` and are **re-checked** every run._"
+        )
+        shown = killed_watchlist[:35]
+        lines.append(
+            "**Skipped downstream (still in YAML):** "
+            + ", ".join(f"`{x}`" for x in shown)
+        )
+        if len(killed_watchlist) > len(shown):
+            lines.append(f"_…and {len(killed_watchlist) - len(shown)} more._")
+        lines.append(
+            f"_{len(killed_syms)} name(s) excluded from downstream TA / Sentiment / CIO this run._"
+        )
+    else:
+        lines.append(
+            f"_{len(killed_syms)} name(s) excluded from downstream TA / Sentiment / CIO this run._"
+        )
+    return "\n".join(lines)
+
 
 def run_hard_veto(
     settings: Settings,
@@ -61,29 +113,7 @@ def run_hard_veto(
         survivors = [r["symbol"] for r in rows if not r["killed"]]
         killed_set = set(killed_syms)
         killed_watchlist = sorted(killed_set & watchlist_all)
-        lines = [
-            "**Hard Veto scan**",
-            f"Candidates: {len(tickers)} | Killed: {len(killed_syms)} | "
-            f"Downstream (TA / Sentiment / CIO): {len(survivors)}",
-        ]
-        for r in rows:
-            status = "KILL" if r["killed"] else "OK"
-            wl = " (watchlist)" if r.get("on_watchlist") else ""
-            lines.append(
-                f"- `{r['symbol']}` **{status}**{wl} — "
-                f"{', '.join(r['reasons']) or 'rules clear'}"
-            )
-        if killed_watchlist:
-            lines.append("")
-            lines.append(
-                "_Watchlist names that **failed** veto are **not** sent to TA / Sentiment / "
-                "CIO this run. They **remain** in `watchlist.yaml` and are **re-checked** every run._"
-            )
-            shown = killed_watchlist[:35]
-            lines.append("**Skipped downstream (still in YAML):** " + ", ".join(f"`{x}`" for x in shown))
-            if len(killed_watchlist) > len(shown):
-                lines.append(f"_…and {len(killed_watchlist) - len(shown)} more._")
-        md = "\n".join(lines)
+        md = format_hard_veto_discord(rows, killed_watchlist=killed_watchlist)
         structured = {
             "vetoes": rows,
             "survivors": survivors,

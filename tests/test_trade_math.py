@@ -7,10 +7,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from swingtrade.trade_math import (
     MIN_BUY_RISK_REWARD,
+    OPPORTUNITY_NEAR_BUY,
+    OPPORTUNITY_NO_ZONE,
+    OPPORTUNITY_PULLBACK_REQUIRED,
     apply_trade_math_to_row,
     calculate_long_trade_math,
+    calculate_opportunity_zone,
     gate_buy_decision,
     long_entry_ref,
+    max_valid_long_entry,
 )
 
 
@@ -105,6 +110,54 @@ def test_invalid_long_sets_math_warning():
     assert "stop" in str(row.get("math_warning", "")).lower()
 
 
+def test_max_valid_long_entry_formula():
+    assert max_valid_long_entry(95, 120) == 102.14
+    assert max_valid_long_entry(2000, 2350) == 2100.0
+    assert max_valid_long_entry(1810, 2050) == 1878.57
+
+
+def test_klac_opportunity_pullback_required():
+    row = apply_trade_math_to_row(
+        {
+            "direction": "Long",
+            "entry_zone": "1910.00 - 1935.00",
+            "stop_loss": 1810,
+            "target": 2050,
+            "risk_reward": 2.6,
+            "decision": "WATCH",
+        }
+    )
+    assert row["opportunity_status"] == OPPORTUNITY_PULLBACK_REQUIRED
+    assert abs(float(row["valid_entry_max"]) - 1878.57) < 0.02
+    assert abs(float(row["current_rr"]) - 0.92) < 0.02
+    assert row["entry_improvement_needed"] is not None
+    assert "Needs entry <=" in row["opportunity_note"]
+
+
+def test_near_buy_opportunity_classification():
+    zone = calculate_opportunity_zone(
+        entry_zone=102.6,
+        stop_loss=95,
+        target=120,
+        math_valid=True,
+        current_rr=2.33,
+    )
+    assert zone["opportunity_status"] == OPPORTUNITY_NEAR_BUY
+    assert "near threshold" in zone["opportunity_note"]
+
+
+def test_invalid_levels_no_actionable_zone():
+    row = apply_trade_math_to_row(
+        {
+            "direction": "Long",
+            "entry_zone": "100-102",
+            "stop_loss": 105,
+            "target": 120,
+        }
+    )
+    assert row["opportunity_status"] == OPPORTUNITY_NO_ZONE
+
+
 def test_model_rr_overridden_when_calculated_differs():
     row = apply_trade_math_to_row(
         {
@@ -127,6 +180,10 @@ if __name__ == "__main__":
         test_invalid_long_stop_above_entry_blocks_buy,
         test_reapply_preserves_model_risk_reward_not_calculated,
         test_invalid_long_sets_math_warning,
+        test_max_valid_long_entry_formula,
+        test_klac_opportunity_pullback_required,
+        test_near_buy_opportunity_classification,
+        test_invalid_levels_no_actionable_zone,
         test_model_rr_overridden_when_calculated_differs,
     ]
     failed = 0

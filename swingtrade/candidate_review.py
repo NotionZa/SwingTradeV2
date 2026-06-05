@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from swingtrade.trade_math import enrich_candidate_trade_fields
+
 logger = logging.getLogger(__name__)
 
 CSV_COLUMNS = (
@@ -26,6 +28,13 @@ CSV_COLUMNS = (
     "model_risk_reward",
     "math_valid",
     "math_warning",
+    "opportunity_status",
+    "required_rr",
+    "valid_entry_max",
+    "current_rr",
+    "rr_gap",
+    "entry_improvement_needed",
+    "opportunity_note",
     "entry_zone",
     "stop_loss",
     "target",
@@ -121,6 +130,13 @@ def select_records_for_review_export(
     return dedupe_records_by_ticker_last(latest_run)
 
 
+def enrich_records_for_review_export(
+    records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Backfill trade-math and opportunity-zone fields before CSV export."""
+    return [enrich_candidate_trade_fields(dict(record)) for record in records]
+
+
 def _cell(value: Any) -> str:
     if value is None:
         return ""
@@ -154,6 +170,8 @@ def export_candidate_review_csv(
     records = select_records_for_review_export(loaded, all_runs=all_runs)
     if not records:
         raise ValueError(f"No candidate records to export from {jsonl_path}")
+
+    records = enrich_records_for_review_export(records)
 
     csv_path = (output_path or review_csv_path_for_jsonl(jsonl_path, reviews_dir)).resolve()
     csv_path.parent.mkdir(parents=True, exist_ok=True)

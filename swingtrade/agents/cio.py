@@ -28,6 +28,8 @@ _CIO_DISCORD_FIELD_MAX_CHARS = 200
 _CIO_DISCORD_BUY_THESIS_MAX_CHARS = 300
 _CIO_DISCORD_BUY_REASON_MAX_CHARS = 220
 _CIO_DISCORD_BUY_ACTION_MAX_CHARS = 180
+_CIO_DISCORD_PROSE_MAX_CHARS = 96
+_CIO_DISCORD_PRIORITY_MAX_CHARS = 220
 
 
 def _extract_cio_decisions(raw: Any) -> tuple[list[dict[str, Any]], str]:
@@ -188,6 +190,16 @@ def _cap_discord_field(value: Any, *, max_chars: int = _CIO_DISCORD_FIELD_MAX_CH
     return text[: max_chars - 3].rstrip() + "..."
 
 
+def _cap_discord_prose(value: Any, *, max_chars: int = _CIO_DISCORD_PROSE_MAX_CHARS) -> str:
+    """Lower-priority narrative fields (case/gap/reason); may ellipsize early."""
+    return _cap_discord_field(value, max_chars=max_chars)
+
+
+def _cap_discord_priority(value: Any, *, max_chars: int = _CIO_DISCORD_PRIORITY_MAX_CHARS) -> str:
+    """Action/numeric/trigger fields; generous cap before ellipsis."""
+    return _cap_discord_field(value, max_chars=max_chars)
+
+
 def _decision_cio_score(row: dict[str, Any]) -> float:
     raw = row.get("cio_score")
     if isinstance(raw, (int, float)):
@@ -218,11 +230,35 @@ def _format_targets_row(row: dict[str, Any]) -> str:
 def _format_invalidation(row: dict[str, Any]) -> str:
     inv = row.get("invalidation_conditions")
     if isinstance(inv, list):
-        parts = [_cap_discord_field(x, max_chars=80) for x in inv if isinstance(x, str) and x.strip()]
+        parts = [
+            _cap_discord_priority(x)
+            for x in inv
+            if isinstance(x, str) and x.strip()
+        ]
         return "; ".join(parts[:3])
     if isinstance(inv, str) and inv.strip():
-        return _cap_discord_field(inv, max_chars=120)
+        return _cap_discord_priority(inv)
     return ""
+
+
+def _format_trade_bits_line(row: dict[str, Any]) -> str | None:
+    """Compact entry/stop/target/R/R line for WATCH/PASS rows."""
+    parts: list[str] = []
+    rr = row.get("risk_reward")
+    if rr is not None and str(rr).strip():
+        parts.append(f"R/R: {rr}")
+    entry = row.get("entry_zone")
+    if entry is not None and str(entry).strip():
+        parts.append(f"Entry: {_cap_discord_priority(entry, max_chars=72)}")
+    stop = row.get("stop_loss")
+    if stop is not None and str(stop).strip():
+        parts.append(f"Stop: {stop}")
+    target = _format_targets_row(row)
+    if target:
+        parts.append(f"Target: {target}")
+    if not parts:
+        return None
+    return "- " + " | ".join(parts)
 
 
 def _split_decisions_by_type(
@@ -288,6 +324,24 @@ def _market_context_lines(structured: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _format_opportunity_discord_line(row: dict[str, Any]) -> str | None:
+    """Concise opportunity hint for WATCH/PASS rows (deterministic trade math)."""
+    status = str(row.get("opportunity_status") or "").strip().upper()
+    if status in ("", "BUY_NOW", "NO_ACTIONABLE_ZONE"):
+        return None
+    required = row.get("required_rr", 2.5)
+    if status == "PULLBACK_REQUIRED":
+        vmax = row.get("valid_entry_max")
+        if vmax is not None:
+            return (
+                f"- **Opportunity:** Pullback <= {vmax} for {required} R/R"
+            )
+    note = row.get("opportunity_note")
+    if isinstance(note, str) and note.strip():
+        return f"- **Opportunity:** {_cap_discord_priority(note.strip())}"
+    return None
+
+
 def _format_buy_detail(row: dict[str, Any]) -> list[str]:
     sym = row["ticker"]
     direction = _cap_discord_field(row.get("direction"), max_chars=40)
@@ -349,23 +403,27 @@ def _format_watch_detail(row: dict[str, Any]) -> list[str]:
             lines.append(f"  - **Action:** {action}")
         return lines
 
-    direction = _cap_discord_field(row.get("direction"), max_chars=40)
-    strategy = _cap_discord_field(row.get("strategy"), max_chars=40)
+    direction = _cap_discord_priority(row.get("direction"), max_chars=40)
+    strategy = _cap_discord_priority(row.get("strategy"), max_chars=40)
     meta = " · ".join(x for x in (direction, strategy) if x)
     header = f"**`{sym}`**" + (f" — {meta}" if meta else "")
     lines = [header]
 
-    reason = _cap_discord_field(row.get("reason"), max_chars=140)
-    thesis = _cap_discord_field(row.get("technical_thesis"), max_chars=160)
+    trade = _format_trade_bits_line(row)
+    if trade:
+        lines.append(trade)
+
+    reason = _cap_discord_prose(row.get("reason"))
+    thesis = _cap_discord_prose(row.get("technical_thesis"))
     if reason:
         lines.append(f"- **Case:** {reason}")
     elif thesis:
         lines.append(f"- **Case:** {thesis}")
     if thesis and reason and thesis != reason:
-        lines.append(f"- **Gap:** {thesis}")
+        lines.append(f"- **Gap:** {_cap_discord_prose(thesis, max_chars=72)}")
 
-    revisit = _cap_discord_field(row.get("revisit_condition"), max_chars=120)
-    action = _cap_discord_field(row.get("action_required"), max_chars=120)
+    revisit = _cap_discord_priority(row.get("revisit_condition"))
+    action = _cap_discord_priority(row.get("action_required"))
     trigger = revisit or action
     if trigger:
         lines.append(f"- **Trigger:** {trigger}")
@@ -374,17 +432,57 @@ def _format_watch_detail(row: dict[str, Any]) -> list[str]:
     if inv:
         lines.append(f"- **Invalidate:** {inv}")
 
+    opp = _format_opportunity_discord_line(row)
+    if opp:
+        lines.append(opp)
+
+    return lines
+
+
+def _format_pass_detail(row: dict[str, Any]) -> list[str]:
+    """Multi-line PASS row; preserves trigger/invalidation/opportunity."""
+    sym = row["ticker"]
+    dec = str(row.get("decision") or "").strip().upper()
+    direction = _cap_discord_priority(row.get("direction"), max_chars=40)
+    strategy = _cap_discord_priority(row.get("strategy"), max_chars=40)
+    meta = " · ".join(x for x in (direction, strategy) if x)
+    header = f"**`{sym}`** — {dec}" + (f" ({meta})" if meta else "")
+    lines = [header]
+
+    trade = _format_trade_bits_line(row)
+    if trade:
+        lines.append(trade)
+
+    reason = _cap_discord_prose(row.get("reason"))
+    if reason:
+        lines.append(f"- **Case:** {reason}")
+
+    revisit = _cap_discord_priority(row.get("revisit_condition"))
+    action = _cap_discord_priority(row.get("action_required"))
+    trigger = revisit or action
+    if trigger:
+        lines.append(f"- **Trigger:** {trigger}")
+
+    inv = _format_invalidation(row)
+    if inv:
+        lines.append(f"- **Invalidate:** {inv}")
+
+    opp = _format_opportunity_discord_line(row)
+    if opp:
+        lines.append(opp)
+
     return lines
 
 
 def _format_pass_blocked_line(row: dict[str, Any]) -> str:
+    """Single-line BLOCKED summary (PASS uses _format_pass_detail)."""
     sym = row["ticker"]
     dec = str(row.get("decision") or "").strip().upper()
-    reason = _cap_discord_field(row.get("reason"), max_chars=120)
-    revisit = _cap_discord_field(row.get("revisit_condition"), max_chars=80)
+    reason = _cap_discord_prose(row.get("reason"), max_chars=80)
     base = f"- **`{sym}`** — {dec}"
     if reason:
         base += f": {reason}"
+    revisit = _cap_discord_priority(row.get("revisit_condition"), max_chars=100)
     if revisit:
         base += f" _(Revisit: {revisit})_"
     return base
@@ -443,7 +541,10 @@ def _fallback_cio_discord_from_decisions(
     if pb_count == 0:
         lines.append("_(none)_")
     else:
-        for row in pass_rows + blocked_rows:
+        for row in pass_rows:
+            lines.extend(_format_pass_detail(row))
+            lines.append("")
+        for row in blocked_rows:
             lines.append(_format_pass_blocked_line(row))
     lines.append("")
 

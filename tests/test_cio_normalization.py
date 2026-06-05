@@ -218,6 +218,90 @@ def test_fallback_markdown_buy_thesis_preserves_decision_ending():
     assert ending not in md_trunc
 
 
+def test_fallback_markdown_watch_preserves_priority_fields_with_long_case():
+    long_case = (
+        "Structure remains constructive with RS improving versus QQQ but volume "
+        "confirmation is still absent and the setup needs a cleaner pullback before "
+        "committing capital at these levels for a swing entry."
+    )
+    structured = apply_trade_math_to_cio_structured(
+        {
+            "decisions": [
+                {
+                    "ticker": "KLAC",
+                    "decision": "WATCH",
+                    "direction": "Long",
+                    "strategy": "Pullback",
+                    "entry_zone": "2080-2130",
+                    "stop_loss": 2000,
+                    "target": 2350,
+                    "risk_reward": 2.5,
+                    "reason": long_case,
+                    "technical_thesis": "Needs pullback to improve R/R before entry.",
+                    "revisit_condition": "Upgrade on reclaim above 20dma with volume > 20d avg.",
+                    "invalidation_conditions": ["Close below 2000 on daily"],
+                    "action_required": "Wait for pullback toward valid entry zone.",
+                }
+            ],
+        }
+    )
+    md = _fallback_cio_discord_from_decisions(structured, "pre_market")
+    assert "**Opportunity:**" in md
+    assert "Pullback <=" in md
+    assert "**Trigger:**" in md
+    assert "Upgrade on reclaim above 20dma" in md
+    assert "**Invalidate:**" in md
+    assert "Close below 2000" in md
+    assert "R/R:" in md
+    assert long_case not in md
+    assert "..." in md
+
+
+def test_fallback_markdown_pass_preserves_opportunity_line():
+    structured = apply_trade_math_to_cio_structured(
+        {
+            "decisions": [
+                {
+                    "ticker": "META",
+                    "decision": "PASS",
+                    "direction": "Long",
+                    "strategy": "Momentum",
+                    "entry_zone": "2080-2130",
+                    "stop_loss": 2000,
+                    "target": 2350,
+                    "risk_reward": 2.5,
+                    "reason": "No clean setup at current levels.",
+                }
+            ],
+        }
+    )
+    md = _fallback_cio_discord_from_decisions(structured, "pre_market")
+    assert "**Opportunity:**" in md
+    assert "Pullback <=" in md
+    assert "**Case:**" in md
+
+
+def test_fallback_markdown_includes_opportunity_for_watch():
+    structured = apply_trade_math_to_cio_structured(
+        {
+            "decisions": [
+                {
+                    "ticker": "KLAC",
+                    "decision": "WATCH",
+                    "direction": "Long",
+                    "entry_zone": "1910.00 - 1935.00",
+                    "stop_loss": 1810,
+                    "target": 2050,
+                    "risk_reward": 2.6,
+                }
+            ],
+        }
+    )
+    md = _fallback_cio_discord_from_decisions(structured, "pre_market")
+    assert "**Opportunity:**" in md
+    assert "Pullback <=" in md
+
+
 def test_cio_trade_math_downgrades_klac_buy():
     structured = apply_trade_math_to_cio_structured(
         {
@@ -384,6 +468,9 @@ if __name__ == "__main__":
         test_fallback_markdown_includes_market_context,
         test_fallback_markdown_includes_buy_trade_details,
         test_fallback_markdown_buy_thesis_preserves_decision_ending,
+        test_fallback_markdown_watch_preserves_priority_fields_with_long_case,
+        test_fallback_markdown_pass_preserves_opportunity_line,
+        test_fallback_markdown_includes_opportunity_for_watch,
         test_cio_trade_math_downgrades_klac_buy,
         test_fallback_markdown_includes_watch_details,
         test_fallback_markdown_summarizes_pass_and_blocked,
