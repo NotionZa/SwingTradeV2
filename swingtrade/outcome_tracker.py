@@ -11,6 +11,7 @@ from typing import Any, Callable
 import pandas as pd
 
 from swingtrade.trade_math import _as_float, parse_entry_zone, parse_entry_zone_zones
+from swingtrade.run_identity import enrich_run_identity
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,8 @@ EXIT_DATA_ERROR = "DATA_ERROR"
 SOURCE_FIELD_KEYS = (
     "date",
     "session",
+    "run_timestamp_utc",
+    "run_id",
     "ticker",
     "decision",
     "review_level",
@@ -328,6 +331,7 @@ def evaluate_signal_row(
     fetch_ohlcv: FetchOhlcvFn | None = None,
 ) -> dict[str, Any]:
     """Evaluate one CSV row; returns merged source + outcome fields."""
+    row = enrich_run_identity(dict(row))
     out = {key: row.get(key, "") for key in SOURCE_FIELD_KEYS}
     ticker = str(row.get("ticker") or "").strip().upper()
     signal_date = _parse_signal_date(row.get("date"))

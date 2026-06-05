@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 OPPORTUNITY_CSV_COLUMNS = (
     "date",
     "session",
+    "run_timestamp_utc",
+    "run_id",
     "ticker",
     "review_level",
     "analysis_rank",

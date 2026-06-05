@@ -44,6 +44,8 @@ def _signal_row(**overrides) -> dict:
     base = {
         "date": "2026-01-06",
         "session": "pre_market",
+        "run_timestamp_utc": "2026-01-06T09:30:00Z",
+        "run_id": "2026-01-06_pre_market_093000Z",
         "ticker": "TEST",
         "decision": "WATCH",
         "review_level": "cio_reviewed",
@@ -217,6 +219,43 @@ def test_run_outcome_backtest_with_mock_fetch(tmp_path: Path):
     assert summary.wins == 1
 
 
+def test_outcome_tracker_preserves_run_identity(tmp_path: Path):
+    csv_path = tmp_path / "signals.csv"
+    with csv_path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(_signal_row().keys()))
+        writer.writeheader()
+        writer.writerow(_signal_row())
+
+    def mock_fetch(symbol: str, start: date, end: date) -> pd.DataFrame:
+        return _bars([("2026-01-06", 100, 100, 97, 99)])
+
+    _out, results, _summary, _extras = run_outcome_backtest(
+        csv_path,
+        horizon_days=1,
+        output_path=tmp_path / "out.csv",
+        fetch_ohlcv=mock_fetch,
+    )
+    assert results[0]["run_timestamp_utc"] == "2026-01-06T09:30:00Z"
+    assert results[0]["run_id"] == "2026-01-06_pre_market_093000Z"
+
+
+def test_outcome_tracker_backfills_run_id_from_timestamp(tmp_path: Path):
+    row = _signal_row(run_id="")
+    row.pop("run_id", None)
+    out = evaluate_signal_row(row, horizon_days=1, fetch_ohlcv=lambda *_: pd.DataFrame())
+    assert out["run_timestamp_utc"] == "2026-01-06T09:30:00Z"
+    assert out["run_id"] == "2026-01-06_pre_market_093000Z"
+
+
+def test_outcome_tracker_legacy_row_without_run_fields(tmp_path: Path):
+    row = _signal_row()
+    row.pop("run_timestamp_utc", None)
+    row.pop("run_id", None)
+    out = evaluate_signal_row(row, horizon_days=1, fetch_ohlcv=lambda *_: pd.DataFrame())
+    assert out.get("run_timestamp_utc") == ""
+    assert out.get("run_id") == ""
+
+
 def test_cli_backtest_outcomes_wires():
     try:
         main(["backtest-outcomes", "--help"])
@@ -236,6 +275,9 @@ if __name__ == "__main__":
         test_planned_entry_preferred_over_valid_entry_max,
         test_summary_counts_are_correct,
         test_run_outcome_backtest_with_mock_fetch,
+        test_outcome_tracker_preserves_run_identity,
+        test_outcome_tracker_backfills_run_id_from_timestamp,
+        test_outcome_tracker_legacy_row_without_run_fields,
         test_cli_backtest_outcomes_wires,
     ]
     failed = 0

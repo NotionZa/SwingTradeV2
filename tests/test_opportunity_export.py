@@ -243,6 +243,31 @@ def test_pass_revisit_included_in_opportunity_export(tmp_path: Path):
     assert row["ta_entry_zone"] == "2100.00 - 2135.00"
 
 
+def test_opportunity_export_preserves_run_id(tmp_path: Path):
+    jsonl = tmp_path / "run_id.jsonl"
+    _write_jsonl(
+        jsonl,
+        [
+            {
+                "run_timestamp_utc": "2026-06-05T14:33:25Z",
+                "date": "2026-06-05",
+                "session": "pre_market",
+                "ticker": "KLAC",
+                "decision": "WATCH",
+                "direction": "Long",
+                "entry_zone": "2100.00 - 2135.00",
+                "stop_loss": 2050,
+                "target": 2280,
+            },
+        ],
+    )
+    csv_path = export_opportunity_csv(jsonl, output_path=tmp_path / "run_id.csv")
+    with csv_path.open(encoding="utf-8") as f:
+        row = next(csv.DictReader(f))
+    assert row["run_timestamp_utc"] == "2026-06-05T14:33:25Z"
+    assert row["run_id"] == "2026-06-05_pre_market_143325Z"
+
+
 def test_review_candidates_unchanged(tmp_path: Path):
     jsonl = tmp_path / "review.jsonl"
     _write_jsonl(
@@ -279,6 +304,7 @@ if __name__ == "__main__":
         test_opportunity_csv_includes_planned_entry_fields,
         test_review_candidates_unchanged,
         test_pass_revisit_included_in_opportunity_export,
+        test_opportunity_export_preserves_run_id,
     ]
     failed = 0
     for t in tests:

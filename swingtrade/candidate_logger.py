@@ -8,6 +8,7 @@ from typing import Any
 
 from swingtrade.candidate_ranker import rank_analysis_pool
 from swingtrade.models.agents import PipelineState, SessionName
+from swingtrade.run_identity import derive_run_id
 from swingtrade.trade_math import enrich_candidate_trade_fields, snapshot_ta_audit_fields
 
 logger = logging.getLogger(__name__)
@@ -155,6 +156,11 @@ def _base_record(
 ) -> dict[str, Any]:
     record: dict[str, Any] = {
         "run_timestamp_utc": run_timestamp_utc,
+        "run_id": derive_run_id(
+            run_timestamp_utc=run_timestamp_utc,
+            date=date,
+            session=session,
+        ),
         "date": date,
         "session": session,
         "ticker": ticker,

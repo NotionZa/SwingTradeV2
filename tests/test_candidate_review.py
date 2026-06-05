@@ -154,6 +154,78 @@ def test_cio_record_finalize_populates_math_audit_fields():
     assert "Model R/R" in str(record.get("math_warning", ""))
 
 
+def test_cio_record_includes_run_id_and_timestamp():
+    record = _build_cio_reviewed_record(
+        {
+            "ticker": "NVDA",
+            "decision": "WATCH",
+            "direction": "Long",
+            "entry_zone": "100-102",
+            "stop_loss": 95,
+            "target": 110,
+        },
+        session="pre_market",
+        run_timestamp_utc="2026-06-05T14:33:25Z",
+        date="2026-06-05",
+        summary={},
+        rank_score=0.8,
+        analysis_rank=1,
+    )
+    assert record["run_timestamp_utc"] == "2026-06-05T14:33:25Z"
+    assert record["run_id"] == "2026-06-05_pre_market_143325Z"
+
+
+def test_export_includes_run_id_backfilled_from_timestamp(tmp_path: Path):
+    jsonl = tmp_path / "run_id.jsonl"
+    _write_jsonl(
+        jsonl,
+        [
+            {
+                "run_timestamp_utc": "2026-06-05T14:33:25Z",
+                "date": "2026-06-05",
+                "session": "pre_market",
+                "ticker": "NVDA",
+                "decision": "WATCH",
+                "direction": "Long",
+                "entry_zone": "100-102",
+                "stop_loss": 95,
+                "target": 110,
+            },
+        ],
+    )
+    csv_path = export_candidate_review_csv(jsonl, output_path=tmp_path / "run_id.csv")
+    with csv_path.open(encoding="utf-8") as f:
+        row = next(csv.DictReader(f))
+    assert "run_timestamp_utc" in CSV_COLUMNS
+    assert "run_id" in CSV_COLUMNS
+    assert row["run_timestamp_utc"] == "2026-06-05T14:33:25Z"
+    assert row["run_id"] == "2026-06-05_pre_market_143325Z"
+
+
+def test_legacy_jsonl_without_run_fields_still_exports(tmp_path: Path):
+    jsonl = tmp_path / "legacy_no_run.jsonl"
+    _write_jsonl(
+        jsonl,
+        [
+            {
+                "date": "2026-05-21",
+                "session": "pre_market",
+                "ticker": "NVDA",
+                "decision": "WATCH",
+                "direction": "Long",
+                "entry_zone": "100-102",
+                "stop_loss": 95,
+                "target": 110,
+            },
+        ],
+    )
+    csv_path = export_candidate_review_csv(jsonl, output_path=tmp_path / "legacy.csv")
+    with csv_path.open(encoding="utf-8") as f:
+        row = next(csv.DictReader(f))
+    assert row["run_timestamp_utc"] == ""
+    assert row["run_id"] == ""
+
+
 def test_review_export_backfills_opportunity_from_old_jsonl_row(tmp_path: Path):
     jsonl = tmp_path / "legacy.jsonl"
     _write_jsonl(
@@ -398,6 +470,9 @@ if __name__ == "__main__":
         test_cio_record_finalize_populates_opportunity_fields,
         test_export_csv_writes_latest_run_only,
         test_cio_pass_record_preserves_ta_audit_and_revisit_fields,
+        test_cio_record_includes_run_id_and_timestamp,
+        test_export_includes_run_id_backfilled_from_timestamp,
+        test_legacy_jsonl_without_run_fields_still_exports,
     ]
     failed = 0
     for t in tests:

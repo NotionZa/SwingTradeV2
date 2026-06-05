@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from swingtrade.run_identity import enrich_run_identity
 from swingtrade.trade_math import enrich_candidate_trade_fields
 
 logger = logging.getLogger(__name__)
@@ -13,6 +14,8 @@ logger = logging.getLogger(__name__)
 CSV_COLUMNS = (
     "date",
     "session",
+    "run_timestamp_utc",
+    "run_id",
     "ticker",
     "review_level",
     "analysis_rank",
@@ -162,8 +165,13 @@ def select_records_for_review_export(
 def enrich_records_for_review_export(
     records: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Backfill trade-math and opportunity-zone fields before CSV export."""
-    return [enrich_candidate_trade_fields(dict(record)) for record in records]
+    """Backfill trade-math, run identity, and opportunity-zone fields before CSV export."""
+    out: list[dict[str, Any]] = []
+    for record in records:
+        row = enrich_run_identity(dict(record))
+        row = enrich_candidate_trade_fields(row)
+        out.append(row)
+    return out
 
 
 def _cell(value: Any) -> str:
