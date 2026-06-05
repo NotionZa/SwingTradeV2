@@ -17,6 +17,7 @@ from swingtrade.pipeline import (
     run_single_agent,
 )
 from swingtrade.settings import get_settings
+from swingtrade.universe_pools import format_universe_status
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +64,8 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument(
         "--max-tickers",
         type=int,
-        default=30,
-        help="Cap trade-candidate tickers per run (excludes Context-only proxies)",
+        default=None,
+        help="Cap trade-candidate tickers per run (default: full core watchlist size)",
     )
     p_run.add_argument(
         "--max-analysis-tickers",
@@ -115,8 +116,8 @@ def main(argv: list[str] | None = None) -> int:
     p_agent.add_argument(
         "--max-tickers",
         type=int,
-        default=30,
-        help="Cap trade-candidate tickers (same as full pipeline)",
+        default=None,
+        help="Cap trade-candidate tickers (default: full core watchlist size)",
     )
     p_agent.add_argument(
         "--max-analysis-tickers",
@@ -203,6 +204,29 @@ def main(argv: list[str] | None = None) -> int:
         help="Include NO_ACTIONABLE_ZONE rows (excluded by default)",
     )
 
+    p_univ = sub.add_parser(
+        "universe-status",
+        help="Print universe pool sizes, sources, and truncation diagnostics",
+    )
+    p_univ.add_argument(
+        "--max-tickers",
+        type=int,
+        default=None,
+        help="Trade-pool cap to simulate (default: full core watchlist size)",
+    )
+    p_univ.add_argument(
+        "--max-analysis-tickers",
+        type=int,
+        default=None,
+        help="Post-veto TA/Sentiment cap (default 30)",
+    )
+    p_univ.add_argument(
+        "--max-cio-tickers",
+        type=int,
+        default=None,
+        help="CIO review cap (default 12)",
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "run":
@@ -258,6 +282,18 @@ def main(argv: list[str] | None = None) -> int:
             logger.error("%s", e)
             return 1
         print(out)
+        return 0
+    if args.command == "universe-status":
+        get_settings.cache_clear()  # type: ignore[attr-defined]
+        settings = get_settings()
+        print(
+            format_universe_status(
+                settings,
+                max_tickers=args.max_tickers,
+                max_analysis_tickers=args.max_analysis_tickers,
+                max_cio_tickers=args.max_cio_tickers,
+            )
+        )
         return 0
     if args.command == "check-models":
         get_settings.cache_clear()  # type: ignore[attr-defined]

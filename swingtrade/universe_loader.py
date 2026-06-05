@@ -50,3 +50,15 @@ def merge_watchlist_into_universe(
             seen.add(t)
             merged.append(t)
     return merged
+
+
+def context_only_tickers(watchlist: dict[str, list[str]]) -> set[str]:
+    """Tickers listed only under Context proxies (excluded from the trade pool)."""
+    ctx = set(watchlist.get("Context proxies", []))
+    other: set[str] = set()
+    for name, xs in watchlist.items():
+        if name == "Context proxies":
+            continue
+        for t in xs:
+            other.add(t)
+    return {t for t in ctx if t not in other}

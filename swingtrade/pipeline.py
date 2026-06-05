@@ -25,7 +25,11 @@ from swingtrade.models.agents import (
     SessionName,
 )
 from swingtrade.settings import Settings, get_settings
-from swingtrade.universe_loader import load_universe_yaml, merge_watchlist_into_universe
+from swingtrade.universe_pools import (
+    build_trade_pool_from_settings,
+    pre_rank_survivors_for_analysis,
+    resolve_max_trade_pool,
+)
 from swingtrade.watchlist_store import load_watchlist_yaml
 
 logger = logging.getLogger(__name__)
@@ -36,17 +40,6 @@ _MARKET_NEWS_DIGEST_FOOTER = (
     f"Showing up to {MARKET_NEWS_DISCORD_MAX_HEADLINES_PER_TICKER} headlines per ticker; "
     "full raw headlines remain available in structured output."
 )
-
-
-def context_only_tickers(watchlist: dict[str, list[str]]) -> set[str]:
-    ctx = set(watchlist.get("Context proxies", []))
-    other: set[str] = set()
-    for name, xs in watchlist.items():
-        if name == "Context proxies":
-            continue
-        for t in xs:
-            other.add(t)
-    return {t for t in ctx if t not in other}
 
 
 def _stub(agent_id: str, note: str) -> AgentResult:
@@ -129,15 +122,6 @@ def _survivors_after_veto(hv: AgentResult, trade: list[str]) -> list[str]:
     return [t for t in trade if t not in killed]
 
 
-def _cap_downstream_survivors(
-    survivors: list[str], cap: int
-) -> tuple[list[str], list[str]]:
-    """Split survivors into downstream pass list and cap-excluded list (stable order)."""
-    if cap <= 0 or len(survivors) <= cap:
-        return list(survivors), []
-    return survivors[:cap], survivors[cap:]
-
-
 def resolve_tier_caps(
     *,
     max_analysis_tickers: int | None = None,
@@ -186,7 +170,7 @@ def run_single_agent(
     agent: SingleAgentName,
     session: SessionName,
     dry_run: bool = False,
-    max_tickers: int = 30,
+    max_tickers: int | None = None,
     max_analysis_tickers: int | None = None,
     max_cio_tickers: int | None = None,
     max_downstream_tickers: int | None = None,
@@ -202,10 +186,9 @@ def run_single_agent(
     ctx = RunContext(session=session, dry_run=dry_run)
 
     wl = load_watchlist_yaml(settings.watchlist_path())
-    uni = load_universe_yaml(settings.universe_path())
-    merged = merge_watchlist_into_universe(uni, wl)
-    ctx_only = context_only_tickers(wl)
-    trade = [t for t in merged if t not in ctx_only][:max_tickers]
+    trade_cap = resolve_max_trade_pool(settings, max_tickers)
+    pool = build_trade_pool_from_settings(settings, max_trade_pool=trade_cap)
+    trade = [e.ticker for e in pool.included]
 
     client = _anthropic_client(settings)
     _validate_models_for_run(settings, client)
@@ -246,7 +229,13 @@ def run_single_agent(
             max_cio_tickers=max_cio_tickers,
             max_downstream_tickers=max_downstream_tickers,
         )
-        analysis_symbols, _ = _cap_downstream_survivors(survivors, analysis_cap)
+        analysis_symbols, _ = pre_rank_survivors_for_analysis(
+            survivors,
+            cap=analysis_cap,
+            active_tickers=pool.active_tickers,
+            prior_by_ticker=pool.prior_by_ticker,
+            fetch_features=True,
+        )
 
         if agent == "technical_analysis":
             if client:
@@ -355,7 +344,7 @@ def run_pipeline(
     *,
     session: SessionName,
     dry_run: bool = False,
-    max_tickers: int = 30,
+    max_tickers: int | None = None,
     max_analysis_tickers: int | None = None,
     max_cio_tickers: int | None = None,
     max_downstream_tickers: int | None = None,
@@ -366,10 +355,9 @@ def run_pipeline(
     ctx = RunContext(session=session, dry_run=dry_run)
 
     wl = load_watchlist_yaml(settings.watchlist_path())
-    uni = load_universe_yaml(settings.universe_path())
-    merged = merge_watchlist_into_universe(uni, wl)
-    ctx_only = context_only_tickers(wl)
-    trade = [t for t in merged if t not in ctx_only][:max_tickers]
+    trade_cap = resolve_max_trade_pool(settings, max_tickers)
+    pool = build_trade_pool_from_settings(settings, max_trade_pool=trade_cap)
+    trade = [e.ticker for e in pool.included]
 
     client = _anthropic_client(settings)
     _validate_models_for_run(settings, client)
@@ -402,7 +390,13 @@ def run_pipeline(
             max_cio_tickers=max_cio_tickers,
             max_downstream_tickers=max_downstream_tickers,
         )
-        analysis_symbols, _ = _cap_downstream_survivors(survivors, analysis_cap)
+        analysis_symbols, _ = pre_rank_survivors_for_analysis(
+            survivors,
+            cap=analysis_cap,
+            active_tickers=pool.active_tickers,
+            prior_by_ticker=pool.prior_by_ticker,
+            fetch_features=True,
+        )
         state.analysis_tickers = analysis_symbols
         cap_note = _analysis_cap_discord_note(len(survivors), len(analysis_symbols))
         hv_discord = hv.discord_markdown.rstrip()

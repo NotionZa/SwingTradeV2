@@ -1,0 +1,7 @@
+# N.20 — Universe pool configuration (discovery placeholder; core comes from universe + watchlist).
+discovery_candidates: []
+
+limits:
+  # PULLBACK_REQUIRED rows with rr_gap at or below this qualify as active opportunities.
+  active_pullback_rr_gap_max: 1.0
+  max_discovery: 15
