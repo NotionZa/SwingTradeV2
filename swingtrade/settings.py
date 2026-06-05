@@ -108,6 +108,9 @@ class Settings(BaseSettings):
     def universe_pools_path(self) -> Path:
         return self.swingtrade_config_dir / "universe_pools.yaml"
 
+    def discovery_seed_path(self) -> Path:
+        return self.swingtrade_config_dir / "discovery_seed.yaml"
+
     def allowed_guild_ids(self) -> set[int]:
         return _parse_snowflake_set(self.discord_allowed_guild_ids)
 

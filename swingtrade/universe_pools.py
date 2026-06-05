@@ -31,12 +31,13 @@ from swingtrade.watchlist_store import load_watchlist_yaml
 
 logger = logging.getLogger(__name__)
 
-SOURCE_CORE = "core"
-SOURCE_ACTIVE = "active"
-SOURCE_DISCOVERY = "discovery"
+SOURCE_ACTIVE = "active_opportunities"
+SOURCE_CORE = "core_watchlist"
+SOURCE_DISCOVERY = "discovery_seed"
 
 DEFAULT_ACTIVE_PULLBACK_RR_GAP_MAX = 1.0
-DEFAULT_MAX_DISCOVERY = 15
+DEFAULT_MAX_DISCOVERY_CANDIDATES = 15
+DEFAULT_MIN_CORE_SLOTS = 0
 DEFAULT_ANALYSIS_CAP = 30
 DEFAULT_CIO_CAP = 12
 
@@ -114,7 +115,49 @@ def load_universe_pools_config(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def load_discovery_candidates(config: dict[str, Any]) -> list[str]:
+def max_discovery_candidates_cap(config: dict[str, Any]) -> int:
+    limits = config.get("limits")
+    if isinstance(limits, dict):
+        for key in ("max_discovery_candidates", "max_discovery"):
+            cap = limits.get(key)
+            if isinstance(cap, int) and cap > 0:
+                return cap
+    return DEFAULT_MAX_DISCOVERY_CANDIDATES
+
+
+def min_core_slots_cap(config: dict[str, Any], *, core_size: int) -> int:
+    limits = config.get("limits")
+    if isinstance(limits, dict):
+        slots = limits.get("min_core_slots")
+        if isinstance(slots, int) and slots > 0:
+            return min(slots, core_size) if core_size else slots
+    if DEFAULT_MIN_CORE_SLOTS > 0:
+        return min(DEFAULT_MIN_CORE_SLOTS, core_size) if core_size else DEFAULT_MIN_CORE_SLOTS
+    return core_size
+
+
+def load_discovery_seed_yaml(path: Path) -> list[str]:
+    """Load categorized discovery_seed.yaml (mapping category -> tickers)."""
+    if not path.exists():
+        return []
+    raw = path.read_text(encoding="utf-8")
+    data = yaml.safe_load(raw)
+    if not isinstance(data, dict):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for tickers in data.values():
+        if not isinstance(tickers, list):
+            continue
+        for item in tickers:
+            sym = _normalize_ticker(item)
+            if sym and sym not in seen:
+                seen.add(sym)
+                out.append(sym)
+    return out
+
+
+def _flat_discovery_candidates_from_config(config: dict[str, Any]) -> list[str]:
     raw = config.get("discovery_candidates")
     if not isinstance(raw, list):
         return []
@@ -125,13 +168,47 @@ def load_discovery_candidates(config: dict[str, Any]) -> list[str]:
         if sym and sym not in seen:
             seen.add(sym)
             out.append(sym)
-    limits = config.get("limits")
-    max_disc = DEFAULT_MAX_DISCOVERY
-    if isinstance(limits, dict):
-        cap = limits.get("max_discovery")
-        if isinstance(cap, int) and cap > 0:
-            max_disc = cap
-    return out[:max_disc]
+    return out
+
+
+def load_discovery_seed_candidates(
+    settings: Settings | None = None,
+    pools_config: dict[str, Any] | None = None,
+    *,
+    discovery_seed_path: Path | None = None,
+) -> list[str]:
+    """Union of discovery_seed.yaml + universe_pools discovery_candidates, capped."""
+    config = pools_config or {}
+    seed_path = discovery_seed_path
+    if seed_path is None and settings is not None:
+        seed_path = settings.discovery_seed_path()
+
+    merged: list[str] = []
+    seen: set[str] = set()
+    for sym in (
+        (load_discovery_seed_yaml(seed_path) if seed_path else [])
+        + _flat_discovery_candidates_from_config(config)
+    ):
+        if sym not in seen:
+            seen.add(sym)
+            merged.append(sym)
+
+    cap = max_discovery_candidates_cap(config)
+    return merged[:cap]
+
+
+def load_discovery_candidates(
+    config: dict[str, Any],
+    *,
+    settings: Settings | None = None,
+    discovery_seed_path: Path | None = None,
+) -> list[str]:
+    """Backward-compatible alias for capped discovery seed list."""
+    return load_discovery_seed_candidates(
+        settings=settings,
+        pools_config=config,
+        discovery_seed_path=discovery_seed_path,
+    )
 
 
 def active_pullback_rr_gap_max(config: dict[str, Any]) -> float:
@@ -144,11 +221,17 @@ def active_pullback_rr_gap_max(config: dict[str, Any]) -> float:
 
 
 def resolve_default_max_trade_pool(settings: Settings) -> int:
-    """Default trade-pool cap: full operator core watchlist (no silent tail truncation)."""
+    """Default cap: full core watchlist + capped discovery-only names."""
     wl = load_watchlist_yaml(settings.watchlist_path())
     uni = load_universe_yaml(settings.universe_path())
+    config = load_universe_pools_config(settings.universe_pools_path())
     core = load_core_watchlist(uni, wl)
-    return len(core) if core else 1
+    discovery = load_discovery_seed_candidates(settings=settings, pools_config=config)
+    core_set = set(core)
+    discovery_only = [t for t in discovery if t not in core_set]
+    min_core = min_core_slots_cap(config, core_size=len(core))
+    base = max(len(core), min_core) if core else min_core
+    return base + len(discovery_only) if base else max(1, len(discovery_only))
 
 
 def resolve_max_trade_pool(settings: Settings, max_tickers: int | None) -> int:
@@ -329,8 +412,14 @@ class TradePoolResult:
     truncated: list[TradePoolEntry]
     core_count: int
     active_count: int
-    discovery_count: int
+    discovery_seed_count: int
+    discovery_included_count: int
     active_records: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def discovery_count(self) -> int:
+        """Discovery-only tickers in the merged pool (excludes core overlap)."""
+        return self.discovery_seed_count
 
     @property
     def active_tickers(self) -> set[str]:
@@ -354,8 +443,10 @@ def build_trade_pool(
     active_records: list[dict[str, Any]] | None = None,
     max_trade_pool: int | None = None,
     data_dir: Path | None = None,
+    settings: Settings | None = None,
+    discovery_seed_path: Path | None = None,
 ) -> TradePoolResult:
-    """Merge core + active + discovery pools; dedupe; preserve source labels."""
+    """Merge active -> core -> discovery; dedupe; preserve source labels."""
     config = pools_config or {}
     gap_max = active_pullback_rr_gap_max(config)
     core = load_core_watchlist(universe, watchlist)
@@ -367,7 +458,12 @@ def build_trade_pool(
             pullback_rr_gap_max=gap_max,
         )
     )
-    discovery = load_discovery_candidates(config)
+    discovery = load_discovery_seed_candidates(
+        settings=settings,
+        pools_config=config,
+        discovery_seed_path=discovery_seed_path,
+    )
+    core_set = set(core)
 
     source_map: dict[str, list[str]] = {}
     order: list[str] = []
@@ -400,16 +496,24 @@ def build_trade_pool(
     truncated = entries[cap:]
 
     active_only = sum(1 for e in entries if SOURCE_ACTIVE in e.sources)
-    discovery_only = sum(
-        1 for e in entries if SOURCE_DISCOVERY in e.sources and SOURCE_CORE not in e.sources
+    discovery_only_merged = sum(
+        1
+        for e in entries
+        if SOURCE_DISCOVERY in e.sources and e.ticker not in core_set
+    )
+    discovery_included = sum(
+        1
+        for e in included
+        if SOURCE_DISCOVERY in e.sources and e.ticker not in core_set
     )
 
     logger.info(
-        "Trade pool: core=%s active_qualifying=%s discovery=%s merged=%s "
-        "included=%s truncated=%s (max_trade_pool=%s)",
+        "Trade pool: core=%s active_qualifying=%s discovery_seed=%s "
+        "discovery_only=%s merged=%s included=%s truncated=%s (max_trade_pool=%s)",
         len(core),
         active_only,
         len(discovery),
+        discovery_only_merged,
         len(entries),
         len(included),
         len(truncated),
@@ -421,7 +525,8 @@ def build_trade_pool(
         truncated=truncated,
         core_count=len(core),
         active_count=active_only,
-        discovery_count=discovery_only,
+        discovery_seed_count=discovery_only_merged,
+        discovery_included_count=discovery_included,
         active_records=active_recs,
     )
 
@@ -591,6 +696,7 @@ def build_trade_pool_from_settings(
         pools_config=config,
         max_trade_pool=cap,
         data_dir=data_dir,
+        settings=settings,
     )
 
 
@@ -609,8 +715,9 @@ def format_universe_status(
     uni = load_universe_yaml(settings.universe_path())
     config = load_universe_pools_config(settings.universe_pools_path())
     core = load_core_watchlist(uni, wl)
-    discovery = load_discovery_candidates(config)
+    discovery_seeds = load_discovery_seed_candidates(settings=settings, pools_config=config)
     gap_max = active_pullback_rr_gap_max(config)
+    max_disc_cap = max_discovery_candidates_cap(config)
     active_recs = load_active_opportunity_records(
         data_dir=data_dir,
         pullback_rr_gap_max=gap_max,
@@ -627,6 +734,7 @@ def format_universe_status(
         active_records=active_recs,
         max_trade_pool=trade_cap,
         data_dir=data_dir,
+        settings=settings,
     )
 
     watchlist_flat = {
@@ -643,10 +751,12 @@ def format_universe_status(
         fetch_features=False,
     )
 
+    core_set = set(core)
+    discovery_only_configured = [t for t in discovery_seeds if t not in core_set]
     default_cap_note = (
         "explicit --max-tickers"
         if max_tickers is not None and max_tickers > 0
-        else f"default (full core={len(core)})"
+        else f"default (core={len(core)} + discovery_only={len(discovery_only_configured)})"
     )
 
     lines = [
@@ -655,9 +765,12 @@ def format_universe_status(
         f"- watchlist.yaml tickers (all categories): {len(watchlist_flat)}",
         f"- core_watchlist (excl. context-only): {len(core)}",
         f"- active_opportunities (qualifying): {len(active_recs)}",
-        f"- discovery_candidates (configured): {len(discovery)}",
+        f"- discovery_seed (configured, capped): {len(discovery_seeds)}",
+        f"- discovery_seed (discovery-only vs core): {len(discovery_only_configured)}",
+        f"- discovery_included (in trade pool): {pool.discovery_included_count}",
         "",
         "**Caps**",
+        f"- max_discovery_candidates: {max_disc_cap}",
         f"- trade_pool_cap ({default_cap_note}): {trade_cap}",
         f"- trade_pool_count (sent to hard veto): {len(pool.included)}",
         f"- analysis_cap (TA/Sentiment): {analysis_cap}",
@@ -678,6 +791,11 @@ def format_universe_status(
     for src in (SOURCE_ACTIVE, SOURCE_CORE, SOURCE_DISCOVERY):
         tickers = by_source[src]
         lines.append(f"- {src}: {len(tickers)}" + (f" ({', '.join(tickers)})" if tickers else ""))
+
+    lines.append("")
+    lines.append("**Included tickers (source labels)**")
+    for entry in pool.included:
+        lines.append(f"- `{entry.ticker}`: {', '.join(entry.sources)}")
 
     lines.append("")
     lines.append("**Excluded before hard veto** (max_trade_pool truncation)")

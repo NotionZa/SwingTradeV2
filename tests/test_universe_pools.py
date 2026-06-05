@@ -21,7 +21,11 @@ from swingtrade.universe_pools import (
     build_trade_pool,
     build_trade_pool_from_settings,
     compute_survivor_features,
+    format_universe_status,
     load_core_watchlist,
+    load_discovery_seed_candidates,
+    load_discovery_seed_yaml,
+    max_discovery_candidates_cap,
     pre_rank_survivors_for_analysis,
     qualify_active_opportunity_records,
     resolve_default_max_trade_pool,
@@ -237,6 +241,68 @@ def test_core_watchlist_excludes_context_only():
     assert "ONLY_CTX" not in core
 
 
+def test_discovery_seed_loads_from_config():
+    repo = Path(__file__).parent.parent
+    settings = Settings(swingtrade_config_dir=repo / "config")
+    seeds = load_discovery_seed_yaml(settings.discovery_seed_path())
+    assert len(seeds) >= 15
+    assert "UNH" in seeds
+    assert "JPM" in seeds
+    from swingtrade.universe_pools import load_universe_pools_config
+
+    config = load_universe_pools_config(settings.universe_pools_path())
+    capped = load_discovery_seed_candidates(settings=settings)
+    assert len(capped) == max_discovery_candidates_cap(config)
+
+
+def test_discovery_duplicate_with_core_preserves_source_labels():
+    pool = build_trade_pool(
+        universe=["AAA", "BBB"],
+        watchlist={},
+        pools_config={
+            "limits": {"max_discovery_candidates": 5},
+            "discovery_candidates": ["BBB", "DIS1", "DIS2"],
+        },
+        active_records=[],
+        max_trade_pool=10,
+    )
+    bbb = next(e for e in pool.included if e.ticker == "BBB")
+    assert SOURCE_CORE in bbb.sources
+    assert SOURCE_DISCOVERY in bbb.sources
+    dis1 = next(e for e in pool.included if e.ticker == "DIS1")
+    assert dis1.sources == [SOURCE_DISCOVERY]
+
+
+def test_max_discovery_candidates_cap_respected():
+    pool = build_trade_pool(
+        universe=_core(),
+        watchlist=_watchlist(),
+        pools_config={
+            "limits": {"max_discovery_candidates": 2},
+            "discovery_candidates": ["Z1", "Z2", "Z3", "Z4"],
+        },
+        active_records=[],
+        max_trade_pool=50,
+    )
+    discovery_included = [
+        e.ticker
+        for e in pool.included
+        if SOURCE_DISCOVERY in e.sources and SOURCE_CORE not in e.sources
+    ]
+    assert len(discovery_included) == 2
+
+
+def test_universe_status_reports_discovery_counts():
+    repo = Path(__file__).parent.parent
+    settings = Settings(swingtrade_config_dir=repo / "config")
+    text = format_universe_status(settings, max_tickers=None)
+    assert "discovery_seed" in text
+    assert "discovery_included" in text
+    assert "core_watchlist" in text
+    assert "active_opportunities" in text
+    assert "Included tickers (source labels)" in text
+
+
 def test_default_trade_pool_includes_full_core_universe():
     from swingtrade.universe_loader import load_universe_yaml
     from swingtrade.watchlist_store import load_watchlist_yaml
@@ -248,11 +314,18 @@ def test_default_trade_pool_includes_full_core_universe():
         load_watchlist_yaml(settings.watchlist_path()),
     )
     assert len(core) == 41
-    assert resolve_default_max_trade_pool(settings) == 41
+    discovery_only = [
+        t
+        for t in load_discovery_seed_candidates(settings=settings)
+        if t not in set(core)
+    ]
+    expected_default = len(core) + len(discovery_only)
+    assert resolve_default_max_trade_pool(settings) == expected_default
     pool = build_trade_pool_from_settings(settings, max_trade_pool=None)
-    assert len(pool.included) == 41
+    assert len(pool.included) == expected_default
+    assert pool.discovery_included_count == len(discovery_only)
     assert len(pool.truncated) == 0
-    assert resolve_max_trade_pool(settings, None) == 41
+    assert resolve_max_trade_pool(settings, None) == expected_default
 
 
 def test_analysis_cap_still_limits_downstream_pool():
@@ -327,6 +400,10 @@ def test_no_llm_imports_in_universe_pools_module():
 
 if __name__ == "__main__":
     tests = [
+        test_discovery_seed_loads_from_config,
+        test_discovery_duplicate_with_core_preserves_source_labels,
+        test_max_discovery_candidates_cap_respected,
+        test_universe_status_reports_discovery_counts,
         test_default_trade_pool_includes_full_core_universe,
         test_analysis_cap_still_limits_downstream_pool,
         test_tier_caps_defaults_unchanged,

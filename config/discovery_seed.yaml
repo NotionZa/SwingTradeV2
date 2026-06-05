@@ -1,0 +1,32 @@
+# N.21 — Sector/thematic discovery seeds (operator-curated; not scraped).
+# Tickers here expand the trade pool beyond config/universe.yaml when caps allow.
+# Overlap with core_watchlist is allowed; source labels preserve both.
+
+Healthcare / Biotech:
+  - UNH
+  - LLY
+  - JNJ
+  - ABBV
+  - ISRG
+
+Financials:
+  - JPM
+  - GS
+  - MS
+  - BAC
+
+Industrials:
+  - CAT
+  - DE
+  - HON
+  - GE
+
+Consumer:
+  - COST
+  - WMT
+  - HD
+  - MCD
+
+Energy (Integrated):
+  - XOM
+  - CVX

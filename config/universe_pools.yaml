@@ -1,7 +1,13 @@
-# N.20 — Universe pool configuration (discovery placeholder; core comes from universe + watchlist).
+# N.20 / N.21 — Universe pool configuration.
+# Core watchlist comes from universe.yaml + watchlist.yaml (trade categories).
+# Discovery seeds load from discovery_seed.yaml (+ optional flat list below).
+
 discovery_candidates: []
 
 limits:
   # PULLBACK_REQUIRED rows with rr_gap at or below this qualify as active opportunities.
   active_pullback_rr_gap_max: 1.0
-  max_discovery: 15
+  # Max discovery-only names appended after core (hard veto still applies).
+  max_discovery_candidates: 15
+  # Ensure trade pool includes at least this many core names when truncating.
+  min_core_slots: 41
