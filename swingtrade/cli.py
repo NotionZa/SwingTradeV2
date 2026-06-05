@@ -9,6 +9,7 @@ from pathlib import Path
 from swingtrade.candidate_review import export_candidate_review_csv
 from swingtrade.opportunity_export import export_opportunity_csv
 from swingtrade.outcome_tracker import format_summary_text, run_outcome_backtest
+from swingtrade.backtest_summary import format_summary_console, run_backtest_summary
 from swingtrade.discord_bot import run_bot
 from swingtrade.logging_config import configure_logging
 from swingtrade.model_guard import check_models
@@ -228,6 +229,29 @@ def main(argv: list[str] | None = None) -> int:
         help="Optional output CSV path (default: data/backtests/<stem>_outcomes.csv)",
     )
 
+    p_summary = sub.add_parser(
+        "summarize-backtests",
+        help="Aggregate historical outcome CSVs under data/backtests/",
+    )
+    p_summary.add_argument(
+        "--input",
+        type=Path,
+        default=None,
+        help="Outcome CSV file or directory (default: data/backtests)",
+    )
+    p_summary.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Overall summary CSV (default: data/backtests/summary.csv)",
+    )
+    p_summary.add_argument(
+        "--by-run-output",
+        type=Path,
+        default=None,
+        help="By-run summary CSV (default: data/backtests/summary_by_run.csv)",
+    )
+
     p_univ = sub.add_parser(
         "universe-status",
         help="Print universe pool sizes, sources, and truncation diagnostics",
@@ -319,6 +343,20 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(out_path)
         print(format_summary_text(summary, extras))
+        return 0
+    if args.command == "summarize-backtests":
+        try:
+            out_summary, out_by_run, overall, by_run, loaded = run_backtest_summary(
+                args.input,
+                output_path=args.output,
+                by_run_output_path=args.by_run_output,
+            )
+        except (FileNotFoundError, ValueError) as e:
+            logger.error("%s", e)
+            return 1
+        print(out_summary)
+        print(out_by_run)
+        print(format_summary_console(overall, by_run, loaded_rows=loaded))
         return 0
     if args.command == "universe-status":
         get_settings.cache_clear()  # type: ignore[attr-defined]
