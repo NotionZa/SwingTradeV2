@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from swingtrade.candidate_review import export_candidate_review_csv
+from swingtrade.opportunity_export import export_opportunity_csv
 from swingtrade.discord_bot import run_bot
 from swingtrade.logging_config import configure_logging
 from swingtrade.model_guard import check_models
@@ -175,6 +176,33 @@ def main(argv: list[str] | None = None) -> int:
         help="Export every JSONL row (all run_timestamp_utc values); default is latest run only",
     )
 
+    p_opp = sub.add_parser(
+        "export-opportunities",
+        help="Export tactical opportunity watchlist CSV under data/opportunities/",
+    )
+    p_opp.add_argument(
+        "--file",
+        type=Path,
+        required=True,
+        help="Path to candidate JSONL, e.g. data/candidates/2026-06-03_post_market.jsonl",
+    )
+    p_opp.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional CSV output path (default: data/opportunities/<stem>_opportunities.csv)",
+    )
+    p_opp.add_argument(
+        "--all-runs",
+        action="store_true",
+        help="Export from every JSONL row; default is latest run only",
+    )
+    p_opp.add_argument(
+        "--include-no-zone",
+        action="store_true",
+        help="Include NO_ACTIONABLE_ZONE rows (excluded by default)",
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "run":
@@ -212,6 +240,19 @@ def main(argv: list[str] | None = None) -> int:
                 args.file,
                 output_path=args.output,
                 all_runs=bool(args.all_runs),
+            )
+        except (FileNotFoundError, ValueError) as e:
+            logger.error("%s", e)
+            return 1
+        print(out)
+        return 0
+    if args.command == "export-opportunities":
+        try:
+            out = export_opportunity_csv(
+                args.file,
+                output_path=args.output,
+                all_runs=bool(args.all_runs),
+                include_no_zone=bool(args.include_no_zone),
             )
         except (FileNotFoundError, ValueError) as e:
             logger.error("%s", e)
