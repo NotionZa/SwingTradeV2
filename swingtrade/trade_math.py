@@ -38,6 +38,19 @@ _PLANNED_ENTRY_FIELD_KEYS = (
     "reward_per_share_at_planned_entry",
 )
 
+TA_AUDIT_FIELD_KEYS = (
+    "ta_direction",
+    "ta_strategy",
+    "ta_entry_zone",
+    "ta_stop_loss",
+    "ta_target",
+    "ta_risk_reward",
+    "ta_math_valid",
+)
+
+_REVISIT_OPPORTUNITY_FIELD_KEYS = tuple(f"revisit_{k}" for k in _OPPORTUNITY_FIELD_KEYS)
+_REVISIT_PLANNED_FIELD_KEYS = tuple(f"revisit_{k}" for k in _PLANNED_ENTRY_FIELD_KEYS)
+
 _NUM_RE = re.compile(r"[\d,]+\.?\d*")
 
 
@@ -489,6 +502,99 @@ def apply_trade_math_to_row(row: dict[str, Any]) -> dict[str, Any]:
     return apply_planned_entry_to_row(apply_opportunity_zone_to_row(out))
 
 
+def snapshot_ta_audit_fields(ta_row: dict[str, Any]) -> dict[str, Any]:
+    """Preserve pre-CIO technical geometry for audit and PASS revisit planning."""
+    if not isinstance(ta_row, dict):
+        return {}
+    entry = ta_row.get("suggested_entry_zone")
+    stop = ta_row.get("suggested_stop_loss")
+    target = ta_row.get("suggested_target")
+    strategy = ta_row.get("strategy_match")
+    enriched = apply_trade_math_to_row(
+        {
+            "direction": "Long",
+            "entry_zone": entry,
+            "stop_loss": stop,
+            "target": target,
+            "risk_reward": ta_row.get("risk_reward"),
+            "model_risk_reward": ta_row.get("model_risk_reward"),
+        }
+    )
+    out: dict[str, Any] = {
+        "ta_direction": "Long",
+        "ta_strategy": strategy,
+        "ta_entry_zone": entry,
+        "ta_stop_loss": stop,
+        "ta_target": target,
+        "ta_math_valid": bool(enriched.get("math_valid")),
+    }
+    if enriched.get("risk_reward") is not None:
+        out["ta_risk_reward"] = enriched["risk_reward"]
+    return out
+
+
+def _clear_revisit_fields(row: dict[str, Any]) -> None:
+    for key in _REVISIT_OPPORTUNITY_FIELD_KEYS + _REVISIT_PLANNED_FIELD_KEYS:
+        row.pop(key, None)
+
+
+def _should_apply_revisit_from_ta(record: dict[str, Any]) -> bool:
+    """PASS rows with valid TA long geometry may get revisit_* planning fields."""
+    if str(record.get("decision") or "").strip().upper() != "PASS":
+        return False
+    if not record.get("ta_math_valid"):
+        return False
+    if (
+        record.get("ta_entry_zone") is None
+        or record.get("ta_stop_loss") is None
+        or record.get("ta_target") is None
+    ):
+        return False
+    final_status = str(record.get("opportunity_status") or "").strip().upper()
+    if record.get("math_valid") and final_status and final_status != OPPORTUNITY_NO_ZONE:
+        return False
+    return True
+
+
+def apply_revisit_from_ta_audit(record: dict[str, Any]) -> dict[str, Any]:
+    """Populate revisit_* opportunity/planned-entry fields from preserved TA geometry."""
+    out = dict(record)
+    if not _should_apply_revisit_from_ta(out):
+        _clear_revisit_fields(out)
+        return out
+
+    ta_enriched = apply_planned_entry_to_row(
+        apply_opportunity_zone_to_row(
+            apply_trade_math_to_row(
+                {
+                    "direction": out.get("ta_direction") or "Long",
+                    "entry_zone": out.get("ta_entry_zone"),
+                    "stop_loss": out.get("ta_stop_loss"),
+                    "target": out.get("ta_target"),
+                    "risk_reward": out.get("ta_risk_reward"),
+                }
+            )
+        )
+    )
+
+    for key in _OPPORTUNITY_FIELD_KEYS:
+        revisit_key = f"revisit_{key}"
+        val = ta_enriched.get(key)
+        if val is not None:
+            out[revisit_key] = val
+
+    for key in _PLANNED_ENTRY_FIELD_KEYS:
+        revisit_key = f"revisit_{key}"
+        if key == "conditional_buy_limit":
+            out[revisit_key] = bool(ta_enriched.get(key))
+        else:
+            val = ta_enriched.get(key)
+            if val is not None:
+                out[revisit_key] = val
+
+    return out
+
+
 CANDIDATE_TRADE_ENRICHMENT_KEYS = (
     "risk_reward",
     "model_risk_reward",
@@ -514,22 +620,29 @@ CANDIDATE_TRADE_ENRICHMENT_KEYS = (
     "qty_for_1000_notional",
     "risk_per_share_at_planned_entry",
     "reward_per_share_at_planned_entry",
+    *TA_AUDIT_FIELD_KEYS,
+    *_REVISIT_OPPORTUNITY_FIELD_KEYS,
+    *_REVISIT_PLANNED_FIELD_KEYS,
 )
 
 
 def enrich_candidate_trade_fields(record: dict[str, Any]) -> dict[str, Any]:
-    """Merge deterministic trade math + opportunity fields onto a candidate row."""
+    """Merge deterministic trade math + opportunity + revisit fields onto a candidate row."""
     out = dict(record)
     enriched = apply_trade_math_to_row(out)
     out["math_valid"] = bool(enriched.get("math_valid"))
     for key in CANDIDATE_TRADE_ENRICHMENT_KEYS:
+        if key in TA_AUDIT_FIELD_KEYS:
+            continue
+        if key in _REVISIT_OPPORTUNITY_FIELD_KEYS or key in _REVISIT_PLANNED_FIELD_KEYS:
+            continue
         if key == "math_valid":
             continue
         if key in enriched:
             out[key] = enriched[key]
         elif key == "math_warning":
             out.pop("math_warning", None)
-    return out
+    return apply_revisit_from_ta_audit(out)
 
 
 def _append_gate_reason(row: dict[str, Any], suffix: str) -> None:

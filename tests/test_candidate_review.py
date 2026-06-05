@@ -330,6 +330,37 @@ def test_export_csv_includes_planned_entry_fields(tmp_path: Path):
     assert row["qty_for_1000_notional"]
 
 
+def test_cio_pass_record_preserves_ta_audit_and_revisit_fields():
+    ta_row = {
+        "strategy_match": "Momentum",
+        "suggested_entry_zone": "2100.00 - 2135.00",
+        "suggested_stop_loss": 2050,
+        "suggested_target": 2280,
+    }
+    record = _build_cio_reviewed_record(
+        {
+            "ticker": "META",
+            "decision": "PASS",
+            "direction": None,
+            "strategy": "No Clean Setup",
+        },
+        session="pre_market",
+        run_timestamp_utc="2026-06-05T12:00:00Z",
+        date="2026-06-05",
+        summary={},
+        rank_score=0.5,
+        analysis_rank=3,
+        ta_row=ta_row,
+    )
+    assert record["decision"] == "PASS"
+    assert record["ta_math_valid"] is True
+    assert record["ta_strategy"] == "Momentum"
+    assert record["ta_entry_zone"] == "2100.00 - 2135.00"
+    assert record.get("revisit_opportunity_status") == OPPORTUNITY_PULLBACK_REQUIRED
+    assert record.get("revisit_planned_entry_price") is not None
+    assert record.get("revisit_conditional_buy_limit") is True
+
+
 def test_export_csv_writes_latest_run_only(tmp_path: Path):
     jsonl = tmp_path / "candidates.jsonl"
     _write_jsonl(
@@ -366,6 +397,7 @@ if __name__ == "__main__":
         test_export_csv_includes_planned_entry_fields,
         test_cio_record_finalize_populates_opportunity_fields,
         test_export_csv_writes_latest_run_only,
+        test_cio_pass_record_preserves_ta_audit_and_revisit_fields,
     ]
     failed = 0
     for t in tests:

@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from swingtrade.trade_math import (
     MIN_BUY_RISK_REWARD,
+    OPPORTUNITY_BUY_NOW,
     OPPORTUNITY_NEAR_BUY,
     OPPORTUNITY_NO_ZONE,
     OPPORTUNITY_PULLBACK_REQUIRED,
@@ -14,10 +15,12 @@ from swingtrade.trade_math import (
     calculate_long_rr_at_entry,
     calculate_long_trade_math,
     calculate_opportunity_zone,
+    enrich_candidate_trade_fields,
     gate_buy_decision,
     long_entry_ref,
     max_valid_long_entry,
     parse_entry_zone_zones,
+    snapshot_ta_audit_fields,
 )
 
 
@@ -253,6 +256,69 @@ def test_calculate_long_rr_at_entry_formula():
     assert calculate_long_rr_at_entry(2117.5, 2050, 2280) == 2.4074
 
 
+def test_pass_preserves_ta_geometry_and_revisit_fields():
+    ta_row = {
+        "strategy_match": "Pullback",
+        "suggested_entry_zone": "100-102",
+        "suggested_stop_loss": 95,
+        "suggested_target": 120,
+        "risk_reward": 2.0,
+    }
+    record = {
+        "ticker": "TEST",
+        "decision": "PASS",
+        "direction": None,
+        "strategy": "No Clean Setup",
+        "entry_zone": None,
+        "stop_loss": None,
+        "target": None,
+    }
+    record.update(snapshot_ta_audit_fields(ta_row))
+    enriched = enrich_candidate_trade_fields(record)
+    assert enriched["decision"] == "PASS"
+    assert enriched["ta_math_valid"] is True
+    assert enriched["ta_entry_zone"] == "100-102"
+    assert enriched["ta_stop_loss"] == 95
+    assert enriched["ta_target"] == 120
+    assert enriched.get("revisit_opportunity_status") in (
+        OPPORTUNITY_PULLBACK_REQUIRED,
+        OPPORTUNITY_NEAR_BUY,
+        OPPORTUNITY_BUY_NOW,
+    )
+    assert enriched.get("revisit_planned_entry_price") is not None
+
+
+def test_pass_with_ta_geometry_does_not_become_buy_or_watch():
+    ta_row = {
+        "suggested_entry_zone": "100-102",
+        "suggested_stop_loss": 95,
+        "suggested_target": 120,
+    }
+    record = {
+        "decision": "PASS",
+        "direction": None,
+        "strategy": "No Clean Setup",
+    }
+    record.update(snapshot_ta_audit_fields(ta_row))
+    enriched = enrich_candidate_trade_fields(record)
+    assert enriched["decision"] == "PASS"
+    gated = gate_buy_decision(enriched)
+    assert gated["decision"] == "PASS"
+
+
+def test_invalid_pass_row_remains_no_actionable_zone():
+    record = {
+        "decision": "PASS",
+        "direction": None,
+        "strategy": "No Clean Setup",
+        "ta_math_valid": False,
+        "ta_entry_zone": None,
+    }
+    enriched = enrich_candidate_trade_fields(record)
+    assert enriched.get("revisit_opportunity_status") is None
+    assert enriched.get("opportunity_status") in (OPPORTUNITY_NO_ZONE, None, "")
+
+
 def test_model_rr_overridden_when_calculated_differs():
     row = apply_trade_math_to_row(
         {
@@ -287,6 +353,9 @@ if __name__ == "__main__":
         test_invalid_geometry_skips_planned_entry_fields,
         test_non_long_skips_planned_entry_fields,
         test_calculate_long_rr_at_entry_formula,
+        test_pass_preserves_ta_geometry_and_revisit_fields,
+        test_pass_with_ta_geometry_does_not_become_buy_or_watch,
+        test_invalid_pass_row_remains_no_actionable_zone,
     ]
     failed = 0
     for t in tests:

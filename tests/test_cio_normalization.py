@@ -14,7 +14,12 @@ from swingtrade.agents.cio import (
     _normalize_cio_structured,
     build_cio_risk_markdown,
 )
-from swingtrade.trade_math import apply_trade_math_to_cio_structured
+from swingtrade.trade_math import (
+    OPPORTUNITY_PULLBACK_REQUIRED,
+    apply_trade_math_to_cio_structured,
+    enrich_candidate_trade_fields,
+    snapshot_ta_audit_fields,
+)
 from swingtrade.models.agents import AgentResult
 
 
@@ -427,6 +432,51 @@ def test_risk_summary_counts_always_follow_final_decisions():
     assert "Highest Conviction:** None" in md
 
 
+def test_pass_discord_shows_revisit_opportunity_from_ta_geometry():
+    ta_row = {
+        "suggested_entry_zone": "2100.00 - 2135.00",
+        "suggested_stop_loss": 2050,
+        "suggested_target": 2280,
+    }
+    decision = {
+        "ticker": "META",
+        "decision": "PASS",
+        "direction": None,
+        "strategy": "No Clean Setup",
+        "reason": "CIO rejected setup at current levels.",
+    }
+    decision.update(snapshot_ta_audit_fields(ta_row))
+    decision = enrich_candidate_trade_fields(decision)
+    structured = {"decisions": [decision]}
+    md = _fallback_cio_discord_from_decisions(structured, "pre_market")
+    assert "**Opportunity:**" in md
+    assert "Conditional limit <=" in md or "Pullback <=" in md
+    assert "R/R:" in md
+    assert "Entry:" in md
+    assert decision.get("revisit_opportunity_status") == OPPORTUNITY_PULLBACK_REQUIRED
+
+
+def test_pass_discord_opportunity_before_case():
+    ta_row = {
+        "suggested_entry_zone": "2100.00 - 2135.00",
+        "suggested_stop_loss": 2050,
+        "suggested_target": 2280,
+    }
+    decision = {
+        "ticker": "META",
+        "decision": "PASS",
+        "direction": None,
+        "strategy": "No Clean Setup",
+        "reason": "No clean setup at current levels.",
+    }
+    decision.update(snapshot_ta_audit_fields(ta_row))
+    decision = enrich_candidate_trade_fields(decision)
+    md = _fallback_cio_discord_from_decisions({"decisions": [decision]}, "pre_market")
+    opp_idx = md.index("**Opportunity:**")
+    case_idx = md.index("**Case:**")
+    assert opp_idx < case_idx
+
+
 def test_risk_summary_highest_conviction_is_highest_scored_buy():
     structured = {
         "summary": {
@@ -477,6 +527,8 @@ if __name__ == "__main__":
         test_fallback_markdown_handles_sparse_system_fallback_watch,
         test_risk_summary_counts_always_follow_final_decisions,
         test_risk_summary_highest_conviction_is_highest_scored_buy,
+        test_pass_discord_shows_revisit_opportunity_from_ta_geometry,
+        test_pass_discord_opportunity_before_case,
     ]
     failed = 0
     for t in tests:

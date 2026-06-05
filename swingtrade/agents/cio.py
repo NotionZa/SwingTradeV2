@@ -15,7 +15,12 @@ from swingtrade.integrations.anthropic_client import complete_json_agent
 from swingtrade.models.agents import AgentResult, RunContext, PipelineState, SessionName
 from swingtrade.prompt_loader import load_system_prompt
 from swingtrade.settings import Settings
-from swingtrade.trade_math import apply_trade_math_to_cio_structured
+from swingtrade.trade_math import (
+    OPPORTUNITY_NO_ZONE,
+    apply_trade_math_to_cio_structured,
+    enrich_candidate_trade_fields,
+    snapshot_ta_audit_fields,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -241,8 +246,88 @@ def _format_invalidation(row: dict[str, Any]) -> str:
     return ""
 
 
+def _ta_row_from_state(state: PipelineState, symbol: str) -> dict[str, Any] | None:
+    ta = state.prior_structured.get("technical_analysis")
+    if not isinstance(ta, dict):
+        return None
+    tickers = ta.get("tickers")
+    if not isinstance(tickers, dict):
+        return None
+    row = tickers.get(symbol) or tickers.get(symbol.upper())
+    return row if isinstance(row, dict) else None
+
+
+def _enrich_cio_decisions_for_discord(
+    structured: dict[str, Any],
+    state: PipelineState,
+) -> dict[str, Any]:
+    """Attach TA audit + revisit fields so Discord can show geometry on PASS rows."""
+    decisions_raw = structured.get("decisions")
+    if not isinstance(decisions_raw, list):
+        return structured
+    enriched: list[dict[str, Any]] = []
+    for item in decisions_raw:
+        if not isinstance(item, dict):
+            enriched.append(item)
+            continue
+        record = dict(item)
+        sym = str(record.get("ticker") or "").strip().upper()
+        ta_row = _ta_row_from_state(state, sym)
+        if ta_row:
+            record.update(snapshot_ta_audit_fields(ta_row))
+        enriched.append(enrich_candidate_trade_fields(record))
+    return {**structured, "decisions": enriched}
+
+
+def _effective_trade_geometry_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Use preserved TA geometry when CIO final levels are blank."""
+    out = dict(row)
+    has_final = any(
+        out.get(k) is not None and str(out.get(k)).strip()
+        for k in ("entry_zone", "stop_loss", "target")
+    )
+    if has_final:
+        return out
+    if out.get("ta_entry_zone") is not None:
+        out["entry_zone"] = out.get("ta_entry_zone")
+        out["stop_loss"] = out.get("ta_stop_loss")
+        out["target"] = out.get("ta_target")
+        if out.get("ta_risk_reward") is not None:
+            out["risk_reward"] = out.get("ta_risk_reward")
+    return out
+
+
+def _effective_opportunity_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Prefer revisit opportunity fields for PASS when CIO cleared final geometry."""
+    out = dict(row)
+    dec = str(out.get("decision") or "").strip().upper()
+    revisit_status = str(out.get("revisit_opportunity_status") or "").strip().upper()
+    if dec != "PASS" or not revisit_status or revisit_status == OPPORTUNITY_NO_ZONE:
+        return out
+    final_status = str(out.get("opportunity_status") or "").strip().upper()
+    if final_status and final_status != OPPORTUNITY_NO_ZONE:
+        return out
+    for key in (
+        "opportunity_status",
+        "required_rr",
+        "valid_entry_max",
+        "current_rr",
+        "rr_gap",
+        "entry_improvement_needed",
+        "opportunity_note",
+        "planned_entry_price",
+        "planned_entry_rr",
+        "conditional_buy_limit",
+    ):
+        revisit_key = f"revisit_{key}"
+        if revisit_key in out and out[revisit_key] is not None:
+            out[key] = out[revisit_key]
+    return out
+
+
 def _format_trade_bits_line(row: dict[str, Any]) -> str | None:
     """Compact entry/stop/target/R/R line for WATCH/PASS rows."""
+    row = _effective_trade_geometry_row(row)
     parts: list[str] = []
     rr = row.get("risk_reward")
     if rr is not None and str(rr).strip():
@@ -308,9 +393,9 @@ def _market_context_lines(structured: dict[str, Any]) -> list[str]:
 
     lines = ["📌 **Market Context**", ""]
     if isinstance(regime, str) and regime.strip():
-        lines.append(f"**Regime:** {_cap_discord_field(regime, max_chars=120)}")
+        lines.append(f"**Regime:** {_cap_discord_field(regime, max_chars=80)}")
     if isinstance(tech_bias, str) and tech_bias.strip():
-        lines.append(f"**Tech Bias:** {_cap_discord_field(tech_bias, max_chars=120)}")
+        lines.append(f"**Tech Bias:** {_cap_discord_field(tech_bias, max_chars=72)}")
     if isinstance(risk, str) and risk.strip():
         lines.append(f"**Risk Level:** {_cap_discord_field(risk, max_chars=80)}")
     concise_note = ""
@@ -326,22 +411,23 @@ def _market_context_lines(structured: dict[str, Any]) -> list[str]:
 
 def _format_opportunity_discord_line(row: dict[str, Any]) -> str | None:
     """Concise opportunity hint for WATCH/PASS rows (deterministic trade math)."""
-    status = str(row.get("opportunity_status") or "").strip().upper()
-    if status in ("", "BUY_NOW", "NO_ACTIONABLE_ZONE"):
-        return None
-    required = row.get("required_rr", 2.5)
-    if row.get("conditional_buy_limit") and row.get("planned_entry_price") is not None:
-        price = row.get("planned_entry_price")
+    source = _effective_opportunity_row(row)
+    required = source.get("required_rr", 2.5)
+    if source.get("conditional_buy_limit") and source.get("planned_entry_price") is not None:
+        price = source.get("planned_entry_price")
         return (
             f"- **Opportunity:** Conditional limit <= {price} for {required} R/R"
         )
+    status = str(source.get("opportunity_status") or "").strip().upper()
+    if status in ("", "BUY_NOW", "NO_ACTIONABLE_ZONE"):
+        return None
     if status == "PULLBACK_REQUIRED":
-        vmax = row.get("valid_entry_max")
+        vmax = source.get("valid_entry_max")
         if vmax is not None:
             return (
                 f"- **Opportunity:** Pullback <= {vmax} for {required} R/R"
             )
-    note = row.get("opportunity_note")
+    note = source.get("opportunity_note")
     if isinstance(note, str) and note.strip():
         return f"- **Opportunity:** {_cap_discord_priority(note.strip())}"
     return None
@@ -418,14 +504,9 @@ def _format_watch_detail(row: dict[str, Any]) -> list[str]:
     if trade:
         lines.append(trade)
 
-    reason = _cap_discord_prose(row.get("reason"))
-    thesis = _cap_discord_prose(row.get("technical_thesis"))
-    if reason:
-        lines.append(f"- **Case:** {reason}")
-    elif thesis:
-        lines.append(f"- **Case:** {thesis}")
-    if thesis and reason and thesis != reason:
-        lines.append(f"- **Gap:** {_cap_discord_prose(thesis, max_chars=72)}")
+    opp = _format_opportunity_discord_line(row)
+    if opp:
+        lines.append(opp)
 
     revisit = _cap_discord_priority(row.get("revisit_condition"))
     action = _cap_discord_priority(row.get("action_required"))
@@ -437,9 +518,11 @@ def _format_watch_detail(row: dict[str, Any]) -> list[str]:
     if inv:
         lines.append(f"- **Invalidate:** {inv}")
 
-    opp = _format_opportunity_discord_line(row)
-    if opp:
-        lines.append(opp)
+    reason = _cap_discord_prose(row.get("reason"), max_chars=100)
+    if not reason:
+        reason = _cap_discord_prose(row.get("technical_thesis"), max_chars=100)
+    if reason:
+        lines.append(f"- **Case:** {reason}")
 
     return lines
 
@@ -458,9 +541,9 @@ def _format_pass_detail(row: dict[str, Any]) -> list[str]:
     if trade:
         lines.append(trade)
 
-    reason = _cap_discord_prose(row.get("reason"))
-    if reason:
-        lines.append(f"- **Case:** {reason}")
+    opp = _format_opportunity_discord_line(row)
+    if opp:
+        lines.append(opp)
 
     revisit = _cap_discord_priority(row.get("revisit_condition"))
     action = _cap_discord_priority(row.get("action_required"))
@@ -472,9 +555,9 @@ def _format_pass_detail(row: dict[str, Any]) -> list[str]:
     if inv:
         lines.append(f"- **Invalidate:** {inv}")
 
-    opp = _format_opportunity_discord_line(row)
-    if opp:
-        lines.append(opp)
+    reason = _cap_discord_prose(row.get("reason"), max_chars=100)
+    if reason:
+        lines.append(f"- **Case:** {reason}")
 
     return lines
 
@@ -777,6 +860,7 @@ def run_cio(
     structured = _filter_cio_decisions_to_pool(structured, cio_symbols)
     structured, missing = _complete_cio_decisions_to_pool(structured, cio_symbols)
     structured = apply_trade_math_to_cio_structured(structured)
+    structured = _enrich_cio_decisions_for_discord(structured, state)
     if missing:
         logger.warning(
             "CIO completion added %s fallback decision(s) for missing tickers: %s",

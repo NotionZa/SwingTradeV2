@@ -15,6 +15,7 @@ from swingtrade.opportunity_export import (
     filter_opportunity_records,
     sort_opportunity_records,
 )
+from swingtrade.candidate_logger import _build_cio_reviewed_record
 from swingtrade.trade_math import (
     OPPORTUNITY_NEAR_BUY,
     OPPORTUNITY_NO_ZONE,
@@ -205,6 +206,43 @@ def test_opportunity_csv_includes_planned_entry_fields(tmp_path: Path):
     assert row["planned_entry_rr"] == "2.5"
 
 
+def test_pass_revisit_included_in_opportunity_export(tmp_path: Path):
+    ta_row = {
+        "suggested_entry_zone": "2100.00 - 2135.00",
+        "suggested_stop_loss": 2050,
+        "suggested_target": 2280,
+    }
+    record = _build_cio_reviewed_record(
+        {
+            "ticker": "META",
+            "decision": "PASS",
+            "direction": None,
+            "strategy": "No Clean Setup",
+        },
+        session="pre_market",
+        run_timestamp_utc="2026-06-05T12:00:00Z",
+        date="2026-06-05",
+        summary={},
+        rank_score=0.4,
+        analysis_rank=2,
+        ta_row=ta_row,
+    )
+    filtered = filter_opportunity_records([record])
+    assert len(filtered) == 1
+    assert filtered[0]["decision"] == "PASS"
+    assert filtered[0].get("revisit_opportunity_status") == OPPORTUNITY_PULLBACK_REQUIRED
+
+    jsonl = tmp_path / "pass_revisit.jsonl"
+    _write_jsonl(jsonl, [record])
+    csv_path = export_opportunity_csv(jsonl, output_path=tmp_path / "pass_revisit.csv")
+    with csv_path.open(encoding="utf-8") as f:
+        row = next(csv.DictReader(f))
+    assert row["decision"] == "PASS"
+    assert row["revisit_opportunity_status"] == OPPORTUNITY_PULLBACK_REQUIRED
+    assert row["revisit_planned_entry_price"]
+    assert row["ta_entry_zone"] == "2100.00 - 2135.00"
+
+
 def test_review_candidates_unchanged(tmp_path: Path):
     jsonl = tmp_path / "review.jsonl"
     _write_jsonl(
@@ -240,6 +278,7 @@ if __name__ == "__main__":
         test_csv_contains_all_expected_columns,
         test_opportunity_csv_includes_planned_entry_fields,
         test_review_candidates_unchanged,
+        test_pass_revisit_included_in_opportunity_export,
     ]
     failed = 0
     for t in tests:

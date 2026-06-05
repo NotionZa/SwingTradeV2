@@ -8,7 +8,7 @@ from typing import Any
 
 from swingtrade.candidate_ranker import rank_analysis_pool
 from swingtrade.models.agents import PipelineState, SessionName
-from swingtrade.trade_math import enrich_candidate_trade_fields
+from swingtrade.trade_math import enrich_candidate_trade_fields, snapshot_ta_audit_fields
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +245,14 @@ def _merge_decision_into_record(
             record[key] = val
 
 
+def _apply_ta_audit_fields(
+    record: dict[str, Any], ta_row: dict[str, Any] | None
+) -> None:
+    """Snapshot pre-CIO technical geometry for audit and PASS revisit planning."""
+    if ta_row:
+        record.update(snapshot_ta_audit_fields(ta_row))
+
+
 def _build_cio_reviewed_record(
     decision: dict[str, Any],
     *,
@@ -254,6 +262,7 @@ def _build_cio_reviewed_record(
     summary: dict[str, Any],
     rank_score: float | None,
     analysis_rank: int | None,
+    ta_row: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     record = _base_record(
         session=session,
@@ -266,6 +275,7 @@ def _build_cio_reviewed_record(
         analysis_rank=analysis_rank,
         summary=summary,
     )
+    _apply_ta_audit_fields(record, ta_row)
     _merge_decision_into_record(record, decision)
     record["decision_raw"] = dict(decision)
     return _finalize_candidate_trade_math(record)
@@ -298,9 +308,9 @@ def _build_screened_record(
     )
     record["decision"] = _SCREENED_DECISION
     record["reason"] = reason
-    _apply_ta_sentiment_fields(
-        record, _ta_row(ta, symbol), _sentiment_block(se, symbol)
-    )
+    ta_row = _ta_row(ta, symbol)
+    _apply_ta_sentiment_fields(record, ta_row, _sentiment_block(se, symbol))
+    _apply_ta_audit_fields(record, ta_row)
     return _finalize_candidate_trade_math(record)
 
 
@@ -347,6 +357,7 @@ def _build_pipeline_records(
                     summary=cio_summary,
                     rank_score=rank_sc,
                     analysis_rank=rank_idx,
+                    ta_row=_ta_row(ta, sym),
                 )
             )
         elif sym in cio_set:
@@ -414,6 +425,7 @@ def _build_pipeline_records(
                     summary=cio_summary,
                     rank_score=None,
                     analysis_rank=None,
+                    ta_row=_ta_row(ta, sym),
                 )
             )
 
@@ -527,6 +539,8 @@ def log_cio_candidates(
     out_dir = output_dir or default_candidates_dir()
     path = _jsonl_path(session, date_str, out_dir)
 
+    ta = _ta_structured(state)
+
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
         records = [
@@ -538,6 +552,7 @@ def log_cio_candidates(
                 summary=summary,
                 rank_score=None,
                 analysis_rank=None,
+                ta_row=_ta_row(ta, str(d.get("ticker", "")).strip().upper()),
             )
             for d in decisions
         ]

@@ -58,6 +58,23 @@ OPPORTUNITY_CSV_COLUMNS = (
     "qty_for_1000_notional",
     "risk_per_share_at_planned_entry",
     "reward_per_share_at_planned_entry",
+    "ta_direction",
+    "ta_strategy",
+    "ta_entry_zone",
+    "ta_stop_loss",
+    "ta_target",
+    "ta_risk_reward",
+    "ta_math_valid",
+    "revisit_opportunity_status",
+    "revisit_required_rr",
+    "revisit_valid_entry_max",
+    "revisit_current_rr",
+    "revisit_rr_gap",
+    "revisit_entry_improvement_needed",
+    "revisit_opportunity_note",
+    "revisit_planned_entry_price",
+    "revisit_planned_entry_rr",
+    "revisit_conditional_buy_limit",
     "entry_zone",
     "stop_loss",
     "target",
@@ -124,6 +141,19 @@ def _normalize_opportunity_status(record: dict[str, Any]) -> str:
     return OPPORTUNITY_NO_ZONE
 
 
+def _export_opportunity_status(record: dict[str, Any]) -> str:
+    """Final opportunity_status, or revisit_opportunity_status for PASS revisit rows."""
+    status = _normalize_opportunity_status(record)
+    if status in _DEFAULT_EXPORT_STATUSES:
+        return status
+    revisit = record.get("revisit_opportunity_status")
+    if isinstance(revisit, str) and revisit.strip():
+        revisit_status = revisit.strip().upper()
+        if revisit_status in _DEFAULT_EXPORT_STATUSES:
+            return revisit_status
+    return status
+
+
 def filter_opportunity_records(
     records: list[dict[str, Any]],
     *,
@@ -135,7 +165,7 @@ def filter_opportunity_records(
         allowed.add(OPPORTUNITY_NO_ZONE)
     out: list[dict[str, Any]] = []
     for record in records:
-        status = _normalize_opportunity_status(record)
+        status = _export_opportunity_status(record)
         if status in allowed:
             out.append(record)
     return out
@@ -145,10 +175,15 @@ def sort_opportunity_records(records: list[dict[str, Any]]) -> list[dict[str, An
     """Sort by status priority, then rr_gap, entry_improvement_needed, rank_score."""
 
     def _key(record: dict[str, Any]) -> tuple[float, float, float, float, str]:
-        status = _normalize_opportunity_status(record)
+        status = _export_opportunity_status(record)
         status_rank = float(_STATUS_SORT_ORDER.get(status, 99))
         rr_gap = _as_float(record.get("rr_gap"))
         entry_imp = _as_float(record.get("entry_improvement_needed"))
+        if status == str(record.get("revisit_opportunity_status") or "").strip().upper():
+            if rr_gap is None:
+                rr_gap = _as_float(record.get("revisit_rr_gap"))
+            if entry_imp is None:
+                entry_imp = _as_float(record.get("revisit_entry_improvement_needed"))
         rank = _as_float(record.get("rank_score"))
         return (
             status_rank,
