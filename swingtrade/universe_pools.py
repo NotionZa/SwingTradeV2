@@ -119,9 +119,10 @@ def max_discovery_candidates_cap(config: dict[str, Any]) -> int:
     limits = config.get("limits")
     if isinstance(limits, dict):
         for key in ("max_discovery_candidates", "max_discovery"):
-            cap = limits.get(key)
-            if isinstance(cap, int) and cap > 0:
-                return cap
+            if key in limits:
+                cap = limits[key]
+                if isinstance(cap, int) and cap >= 0:
+                    return cap
     return DEFAULT_MAX_DISCOVERY_CANDIDATES
 
 
@@ -178,7 +179,12 @@ def load_discovery_seed_candidates(
     discovery_seed_path: Path | None = None,
 ) -> list[str]:
     """Union of discovery_seed.yaml + universe_pools discovery_candidates, capped."""
-    config = pools_config or {}
+    if pools_config is not None:
+        config = pools_config
+    elif settings is not None:
+        config = load_universe_pools_config(settings.universe_pools_path())
+    else:
+        config = {}
     seed_path = discovery_seed_path
     if seed_path is None and settings is not None:
         seed_path = settings.discovery_seed_path()

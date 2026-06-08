@@ -8,6 +8,7 @@ limits:
   # PULLBACK_REQUIRED rows with rr_gap at or below this qualify as active opportunities.
   active_pullback_rr_gap_max: 1.0
   # Max discovery-only names appended after core (hard veto still applies).
-  max_discovery_candidates: 15
+  # Set to 0 during apples-to-apples data collection (core watchlist only).
+  max_discovery_candidates: 0
   # Ensure trade pool includes at least this many core names when truncating.
   min_core_slots: 41
