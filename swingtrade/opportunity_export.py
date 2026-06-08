@@ -12,6 +12,7 @@ from swingtrade.candidate_review import (
     latest_run_timestamp_utc,
     select_records_for_review_export,
 )
+from swingtrade.export_archive import write_archive_snapshot
 from swingtrade.trade_math import (
     OPPORTUNITY_BUY_NOW,
     OPPORTUNITY_NEAR_BUY,
@@ -251,6 +252,8 @@ def export_opportunity_csv(
         writer.writeheader()
         for record in records:
             writer.writerow(_opportunity_csv_row(record))
+
+    write_archive_snapshot(csv_path, records)
 
     latest = latest_run_timestamp_utc(loaded)
     logger.info(

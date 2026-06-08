@@ -10,8 +10,9 @@ from typing import Any, Callable
 
 import pandas as pd
 
-from swingtrade.trade_math import _as_float, parse_entry_zone, parse_entry_zone_zones
+from swingtrade.export_archive import write_archive_snapshot
 from swingtrade.run_identity import enrich_run_identity
+from swingtrade.trade_math import _as_float, parse_entry_zone, parse_entry_zone_zones
 
 logger = logging.getLogger(__name__)
 
@@ -561,6 +562,7 @@ def export_outcome_csv(rows: list[dict[str, Any]], output_path: Path) -> Path:
         writer.writeheader()
         for row in rows:
             writer.writerow({col: _cell(row.get(col)) for col in OUTPUT_COLUMNS})
+    write_archive_snapshot(output_path, rows)
     return output_path
 
 

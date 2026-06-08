@@ -369,7 +369,11 @@ def load_outcome_csv(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def discover_outcome_csvs(input_path: Path) -> list[Path]:
+def discover_outcome_csvs(
+    input_path: Path,
+    *,
+    include_archive: bool = False,
+) -> list[Path]:
     """Find *_outcomes.csv files under a directory (or a single file path)."""
     input_path = input_path.resolve()
     if input_path.is_file():
@@ -382,20 +386,61 @@ def discover_outcome_csvs(input_path: Path) -> list[Path]:
         for p in input_path.glob("*_outcomes.csv")
         if p.is_file() and p.name not in _SUMMARY_OUTPUT_NAMES
     )
+    if include_archive:
+        archive_dir = input_path / "archive"
+        if archive_dir.is_dir():
+            files.extend(
+                sorted(
+                    p
+                    for p in archive_dir.glob("*_outcomes.csv")
+                    if p.is_file()
+                )
+            )
     if not files:
         raise ValueError(f"No *_outcomes.csv files in {input_path}")
     return files
 
 
-def load_outcome_rows(input_path: Path) -> list[dict[str, Any]]:
+def _outcome_row_dedupe_key(row: dict[str, Any]) -> tuple[str, ...]:
+    """Conservative dedupe key when top-level and archive share the same run."""
+    run_id = _group_value(row, "run_id")
+    ticker = _group_value(row, "ticker").upper()
+    date_val = _group_value(row, "date")[:10]
+    session = _group_value(row, "session")
+    if run_id:
+        return ("run", run_id, ticker, date_val, session)
+    source = str(row.get("_source_file") or "").strip()
+    return ("legacy", ticker, date_val, session, source)
+
+
+def dedupe_outcome_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop duplicate rows loaded from latest + archive sources (keep first)."""
+    seen: set[tuple[str, ...]] = set()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        key = _outcome_row_dedupe_key(row)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+    return out
+
+
+def load_outcome_rows(
+    input_path: Path,
+    *,
+    include_archive: bool = False,
+) -> list[dict[str, Any]]:
     """Load one or many outcome CSV files."""
-    files = discover_outcome_csvs(input_path)
+    files = discover_outcome_csvs(input_path, include_archive=include_archive)
     rows: list[dict[str, Any]] = []
     for path in files:
         try:
             rows.extend(load_outcome_csv(path))
         except OSError as exc:
             logger.warning("Skipping unreadable outcome file %s: %s", path, exc)
+    if include_archive:
+        rows = dedupe_outcome_rows(rows)
     if not rows:
         raise ValueError(f"No outcome rows loaded from {input_path}")
     return rows
@@ -460,6 +505,7 @@ def run_backtest_summary(
     output_path: Path | None = None,
     by_run_output_path: Path | None = None,
     filters: BacktestSummaryFilters | None = None,
+    include_archive: bool = False,
 ) -> tuple[Path, Path, list[dict[str, Any]], list[dict[str, Any]], int, int]:
     """Load outcome CSVs, apply filters, write summary CSVs.
 
@@ -469,7 +515,7 @@ def run_backtest_summary(
     out_summary = (output_path or in_dir / "summary.csv").resolve()
     out_by_run = (by_run_output_path or in_dir / "summary_by_run.csv").resolve()
 
-    raw_rows = load_outcome_rows(in_dir)
+    raw_rows = load_outcome_rows(in_dir, include_archive=include_archive)
     raw_loaded = len(raw_rows)
     rows = apply_summary_filters(raw_rows, filters)
     filter_label = filters.label() if filters else ""

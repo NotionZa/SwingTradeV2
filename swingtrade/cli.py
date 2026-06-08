@@ -317,6 +317,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Drop rows lacking run_id and planned/opportunity tracking",
     )
+    p_summary.add_argument(
+        "--include-archive",
+        action="store_true",
+        help="Also load data/backtests/archive/*_outcomes.csv (deduped by run_id)",
+    )
 
     p_univ = sub.add_parser(
         "universe-status",
@@ -419,6 +424,7 @@ def main(argv: list[str] | None = None) -> int:
                     output_path=args.output,
                     by_run_output_path=args.by_run_output,
                     filters=summary_filters,
+                    include_archive=getattr(args, "include_archive", False),
                 )
             )
         except (FileNotFoundError, ValueError) as e:

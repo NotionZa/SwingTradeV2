@@ -202,6 +202,35 @@ def test_export_includes_run_id_backfilled_from_timestamp(tmp_path: Path):
     assert row["run_id"] == "2026-06-05_pre_market_143325Z"
 
 
+def test_review_export_writes_latest_and_archive_copy(tmp_path: Path):
+    jsonl = tmp_path / "2026-06-08_pre_market.jsonl"
+    _write_jsonl(
+        jsonl,
+        [
+            {
+                "run_timestamp_utc": "2026-06-08T13:36:41Z",
+                "date": "2026-06-08",
+                "session": "pre_market",
+                "ticker": "NVDA",
+                "decision": "WATCH",
+                "direction": "Long",
+                "entry_zone": "100-102",
+                "stop_loss": 95,
+                "target": 110,
+            },
+        ],
+    )
+    latest = tmp_path / "2026-06-08_pre_market_review.csv"
+    csv_path = export_candidate_review_csv(jsonl, output_path=latest)
+    assert csv_path == latest.resolve()
+    assert latest.is_file()
+    archive = tmp_path / "archive" / "2026-06-08_pre_market_133641Z_review.csv"
+    assert archive.is_file()
+    with archive.open(encoding="utf-8") as f:
+        row = next(csv.DictReader(f))
+    assert row["run_id"] == "2026-06-08_pre_market_133641Z"
+
+
 def test_legacy_jsonl_without_run_fields_still_exports(tmp_path: Path):
     jsonl = tmp_path / "legacy_no_run.jsonl"
     _write_jsonl(
@@ -224,6 +253,7 @@ def test_legacy_jsonl_without_run_fields_still_exports(tmp_path: Path):
         row = next(csv.DictReader(f))
     assert row["run_timestamp_utc"] == ""
     assert row["run_id"] == ""
+    assert not (tmp_path / "archive").exists()
 
 
 def test_review_export_backfills_opportunity_from_old_jsonl_row(tmp_path: Path):
@@ -472,6 +502,7 @@ if __name__ == "__main__":
         test_cio_pass_record_preserves_ta_audit_and_revisit_fields,
         test_cio_record_includes_run_id_and_timestamp,
         test_export_includes_run_id_backfilled_from_timestamp,
+        test_review_export_writes_latest_and_archive_copy,
         test_legacy_jsonl_without_run_fields_still_exports,
     ]
     failed = 0

@@ -193,6 +193,28 @@ def test_summary_counts_are_correct():
     assert "average R (triggered): 0.5" in text
 
 
+def test_outcome_export_writes_latest_and_archive_copy(tmp_path: Path):
+    csv_path = tmp_path / "2026-01-06_pre_market_review.csv"
+    with csv_path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(_signal_row().keys()))
+        writer.writeheader()
+        writer.writerow(_signal_row())
+
+    def mock_fetch(symbol: str, start: date, end: date) -> pd.DataFrame:
+        return _bars([("2026-01-06", 100, 100, 97, 99)])
+
+    latest = tmp_path / "2026-01-06_pre_market_review_outcomes.csv"
+    out_path, _results, _summary, _extras = run_outcome_backtest(
+        csv_path,
+        horizon_days=1,
+        output_path=latest,
+        fetch_ohlcv=mock_fetch,
+    )
+    assert out_path == latest.resolve()
+    archive = tmp_path / "archive" / "2026-01-06_pre_market_093000Z_review_outcomes.csv"
+    assert archive.is_file()
+
+
 def test_run_outcome_backtest_with_mock_fetch(tmp_path: Path):
     csv_path = tmp_path / "signals.csv"
     with csv_path.open("w", encoding="utf-8", newline="") as f:
@@ -274,6 +296,7 @@ if __name__ == "__main__":
         test_missing_geometry_is_invalid,
         test_planned_entry_preferred_over_valid_entry_max,
         test_summary_counts_are_correct,
+        test_outcome_export_writes_latest_and_archive_copy,
         test_run_outcome_backtest_with_mock_fetch,
         test_outcome_tracker_preserves_run_identity,
         test_outcome_tracker_backfills_run_id_from_timestamp,

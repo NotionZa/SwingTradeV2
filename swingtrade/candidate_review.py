@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from swingtrade.export_archive import write_archive_snapshot
 from swingtrade.run_identity import enrich_run_identity
 from swingtrade.trade_math import enrich_candidate_trade_fields
 
@@ -218,6 +219,8 @@ def export_candidate_review_csv(
         writer.writeheader()
         for record in records:
             writer.writerow(_csv_row(record))
+
+    write_archive_snapshot(csv_path, records)
 
     latest = latest_run_timestamp_utc(loaded)
     logger.info(

@@ -14,6 +14,8 @@ from swingtrade.backtest_summary import (
     BacktestSummaryFilters,
     aggregate_outcome_rows,
     apply_summary_filters,
+    dedupe_outcome_rows,
+    discover_outcome_csvs,
     is_legacy_outcome_row,
     load_outcome_rows,
     run_backtest_summary,
@@ -378,6 +380,53 @@ def test_cli_summarize_backtests_help():
         raise AssertionError("expected SystemExit(0) for --help")
 
 
+def test_summarize_backtests_default_excludes_archive(tmp_path: Path):
+    _write_outcomes(tmp_path / "fixture_outcomes.csv", [_sample_row()])
+    archive_dir = tmp_path / "archive"
+    archive_dir.mkdir()
+    _write_outcomes(
+        archive_dir / "2026-06-05_pre_market_143325Z_review_outcomes.csv",
+        [_sample_row(ticker="ARCHIVE_ONLY")],
+    )
+    rows = load_outcome_rows(tmp_path, include_archive=False)
+    assert len(rows) == 1
+    assert rows[0]["ticker"] == "CAT"
+    files = discover_outcome_csvs(tmp_path, include_archive=False)
+    assert all("archive" not in str(p) for p in files)
+
+
+def test_summarize_backtests_include_archive_loads_archive_rows(tmp_path: Path):
+    _write_outcomes(tmp_path / "fixture_outcomes.csv", [_sample_row()])
+    archive_dir = tmp_path / "archive"
+    archive_dir.mkdir()
+    _write_outcomes(
+        archive_dir / "2026-06-05_pre_market_143325Z_review_outcomes.csv",
+        [_sample_row(ticker="ARCHIVE_ONLY")],
+    )
+    rows = load_outcome_rows(tmp_path, include_archive=True)
+    assert len(rows) == 2
+    tickers = {r["ticker"] for r in rows}
+    assert tickers == {"CAT", "ARCHIVE_ONLY"}
+
+
+def test_summarize_backtests_include_archive_dedupes_same_run(tmp_path: Path):
+    row = _sample_row()
+    _write_outcomes(tmp_path / "fixture_outcomes.csv", [row])
+    archive_dir = tmp_path / "archive"
+    archive_dir.mkdir()
+    _write_outcomes(
+        archive_dir / "2026-06-05_pre_market_143325Z_review_outcomes.csv",
+        [row],
+    )
+    rows = load_outcome_rows(tmp_path, include_archive=True)
+    assert len(rows) == 1
+    deduped = dedupe_outcome_rows(
+        load_outcome_rows(tmp_path, include_archive=False)
+        + load_outcome_rows(tmp_path / "archive", include_archive=False)
+    )
+    assert len(deduped) == 1
+
+
 def test_cli_help_lists_filter_flags():
     import io
     from contextlib import redirect_stdout
@@ -390,6 +439,7 @@ def test_cli_help_lists_filter_flags():
         assert exc.code == 0
     captured = buf.getvalue()
     for flag in (
+        "--include-archive",
         "--exclude-legacy",
         "--only-closed",
         "--only-conditional",
@@ -419,6 +469,9 @@ if __name__ == "__main__":
         test_zero_row_filter_writes_empty_csv,
         test_filter_label_in_output,
         test_legacy_missing_run_id_works,
+        test_summarize_backtests_default_excludes_archive,
+        test_summarize_backtests_include_archive_loads_archive_rows,
+        test_summarize_backtests_include_archive_dedupes_same_run,
         test_cli_summarize_backtests_help,
         test_cli_help_lists_filter_flags,
     ]

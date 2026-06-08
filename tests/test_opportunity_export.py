@@ -268,6 +268,31 @@ def test_opportunity_export_preserves_run_id(tmp_path: Path):
     assert row["run_id"] == "2026-06-05_pre_market_143325Z"
 
 
+def test_opportunity_export_writes_latest_and_archive_copy(tmp_path: Path):
+    jsonl = tmp_path / "2026-06-08_pre_market.jsonl"
+    _write_jsonl(
+        jsonl,
+        [
+            {
+                "run_timestamp_utc": "2026-06-08T13:36:41Z",
+                "date": "2026-06-08",
+                "session": "pre_market",
+                "ticker": "NVDA",
+                "decision": "WATCH",
+                "direction": "Long",
+                "entry_zone": "100-105",
+                "stop_loss": 95,
+                "target": 120,
+            },
+        ],
+    )
+    latest = tmp_path / "2026-06-08_pre_market_opportunities.csv"
+    csv_path = export_opportunity_csv(jsonl, output_path=latest)
+    assert csv_path == latest.resolve()
+    archive = tmp_path / "archive" / "2026-06-08_pre_market_133641Z_opportunities.csv"
+    assert archive.is_file()
+
+
 def test_review_candidates_unchanged(tmp_path: Path):
     jsonl = tmp_path / "review.jsonl"
     _write_jsonl(
@@ -305,6 +330,7 @@ if __name__ == "__main__":
         test_review_candidates_unchanged,
         test_pass_revisit_included_in_opportunity_export,
         test_opportunity_export_preserves_run_id,
+        test_opportunity_export_writes_latest_and_archive_copy,
     ]
     failed = 0
     for t in tests:
