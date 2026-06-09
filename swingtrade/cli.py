@@ -31,6 +31,12 @@ from swingtrade.research_diagnostics import (
     format_diagnostics_console,
     run_research_edge_diagnostics,
 )
+from swingtrade.research_refresh import (
+    ResearchRefreshError,
+    format_research_refresh_plan,
+    format_research_refresh_summary,
+    run_research_refresh,
+)
 from swingtrade.universe_pools import format_universe_status
 
 logger = logging.getLogger(__name__)
@@ -359,6 +365,43 @@ def main(argv: list[str] | None = None) -> int:
         help="Remove duplicate rows by run_id+ticker+source_type (default: on)",
     )
 
+    p_refresh = sub.add_parser(
+        "research-refresh",
+        help="Run full post-pipeline research refresh from a candidate JSONL file",
+    )
+    p_refresh.add_argument(
+        "--candidate-file",
+        type=Path,
+        required=True,
+        help="Candidate JSONL path, e.g. data/candidates/2026-06-09_pre_market.jsonl",
+    )
+    p_refresh.add_argument(
+        "--days",
+        type=int,
+        default=10,
+        help="Trading-day horizon for backtest-outcomes (default 10)",
+    )
+    p_refresh.add_argument(
+        "--include-archive",
+        action="store_true",
+        help="Pass --include-archive to summarize-backtests",
+    )
+    p_refresh.add_argument(
+        "--skip-diagnostics",
+        action="store_true",
+        help="Skip diagnose-research-edge",
+    )
+    p_refresh.add_argument(
+        "--skip-research-dataset",
+        action="store_true",
+        help="Skip build-research-dataset",
+    )
+    p_refresh.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print planned steps and output paths without executing",
+    )
+
     p_diag = sub.add_parser(
         "diagnose-research-edge",
         help="Read signal_master.csv and produce research edge diagnostics",
@@ -505,6 +548,35 @@ def main(argv: list[str] | None = None) -> int:
                 filters=summary_filters,
             )
         )
+        return 0
+    if args.command == "research-refresh":
+        try:
+            result = run_research_refresh(
+                args.candidate_file,
+                days=int(args.days),
+                include_archive=bool(args.include_archive),
+                skip_diagnostics=bool(args.skip_diagnostics),
+                skip_research_dataset=bool(args.skip_research_dataset),
+                dry_run=bool(args.dry_run),
+            )
+        except (FileNotFoundError, ValueError) as e:
+            logger.error("%s", e)
+            return 1
+        except ResearchRefreshError as e:
+            logger.error("%s", e)
+            return 1
+        if result.dry_run:
+            print(
+                format_research_refresh_plan(
+                    result.paths,
+                    days=int(args.days),
+                    include_archive=bool(args.include_archive),
+                    skip_diagnostics=bool(args.skip_diagnostics),
+                    skip_research_dataset=bool(args.skip_research_dataset),
+                )
+            )
+        else:
+            print(format_research_refresh_summary(result))
         return 0
     if args.command == "diagnose-research-edge":
         try:
