@@ -27,6 +27,10 @@ from swingtrade.research_dataset import (
     format_research_dataset_summary,
     run_build_research_dataset,
 )
+from swingtrade.research_diagnostics import (
+    format_diagnostics_console,
+    run_research_edge_diagnostics,
+)
 from swingtrade.universe_pools import format_universe_status
 
 logger = logging.getLogger(__name__)
@@ -355,6 +359,34 @@ def main(argv: list[str] | None = None) -> int:
         help="Remove duplicate rows by run_id+ticker+source_type (default: on)",
     )
 
+    p_diag = sub.add_parser(
+        "diagnose-research-edge",
+        help="Read signal_master.csv and produce research edge diagnostics",
+    )
+    p_diag.add_argument(
+        "--input",
+        type=Path,
+        default=None,
+        help="Signal master CSV (default: data/research/signal_master.csv)",
+    )
+    p_diag.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Diagnostics CSV output (default: data/research/edge_diagnostics.csv)",
+    )
+    p_diag.add_argument(
+        "--markdown",
+        type=Path,
+        default=None,
+        help="Markdown summary output (default: data/research/edge_diagnostics.md)",
+    )
+    p_diag.add_argument(
+        "--no-markdown",
+        action="store_true",
+        help="Skip writing edge_diagnostics.md",
+    )
+
     p_univ = sub.add_parser(
         "universe-status",
         help="Print universe pool sizes, sources, and truncation diagnostics",
@@ -473,6 +505,22 @@ def main(argv: list[str] | None = None) -> int:
                 filters=summary_filters,
             )
         )
+        return 0
+    if args.command == "diagnose-research-edge":
+        try:
+            summary, _rows = run_research_edge_diagnostics(
+                input_path=args.input,
+                output_csv=args.output,
+                output_markdown=args.markdown,
+                write_markdown=not bool(args.no_markdown),
+            )
+        except (FileNotFoundError, ValueError) as e:
+            logger.error("%s", e)
+            return 1
+        print(summary.output_csv)
+        if summary.output_markdown:
+            print(summary.output_markdown)
+        print(format_diagnostics_console(summary))
         return 0
     if args.command == "build-research-dataset":
         try:
