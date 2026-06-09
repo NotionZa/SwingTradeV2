@@ -23,6 +23,10 @@ from swingtrade.pipeline import (
     run_single_agent,
 )
 from swingtrade.settings import get_settings
+from swingtrade.research_dataset import (
+    format_research_dataset_summary,
+    run_build_research_dataset,
+)
 from swingtrade.universe_pools import format_universe_status
 
 logger = logging.getLogger(__name__)
@@ -323,6 +327,34 @@ def main(argv: list[str] | None = None) -> int:
         help="Also load data/backtests/archive/*_outcomes.csv (deduped by run_id)",
     )
 
+    p_research = sub.add_parser(
+        "build-research-dataset",
+        help="Consolidate archived review/opportunity/outcome CSVs into research masters",
+    )
+    p_research.add_argument(
+        "--input-root",
+        type=Path,
+        default=None,
+        help="Data root containing reviews/opportunities/backtests (default: data)",
+    )
+    p_research.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Research master CSV output directory (default: data/research)",
+    )
+    p_research.add_argument(
+        "--include-latest",
+        action="store_true",
+        help="Also include top-level latest CSVs alongside archive snapshots",
+    )
+    p_research.add_argument(
+        "--dedupe",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Remove duplicate rows by run_id+ticker+source_type (default: on)",
+    )
+
     p_univ = sub.add_parser(
         "universe-status",
         help="Print universe pool sizes, sources, and truncation diagnostics",
@@ -441,6 +473,21 @@ def main(argv: list[str] | None = None) -> int:
                 filters=summary_filters,
             )
         )
+        return 0
+    if args.command == "build-research-dataset":
+        try:
+            summary, outputs = run_build_research_dataset(
+                input_root=args.input_root,
+                output_dir=args.output_dir,
+                include_latest=bool(args.include_latest),
+                dedupe=bool(args.dedupe),
+            )
+        except OSError as e:
+            logger.error("%s", e)
+            return 1
+        for path in outputs.values():
+            print(path)
+        print(format_research_dataset_summary(summary))
         return 0
     if args.command == "universe-status":
         get_settings.cache_clear()  # type: ignore[attr-defined]
